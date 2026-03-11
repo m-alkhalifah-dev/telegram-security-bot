@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Activity Log — SecBot{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="text-success mb-0"><i class="bi bi-journal-text me-2"></i>Activity Log</h4>
+  <div class="d-flex gap-2 align-items-center">
+    <input type="text" id="log-search" class="form-control form-control-sm bg-dark border-secondary text-light"
+           placeholder="Filter events..." oninput="filterLogs()" style="width:200px">
+    <span class="badge bg-secondary">{{ activity|length }} entries</span>
+  </div>
+</div>
+
+<div class="dash-card p-3">
+  {% if activity %}
+  <div class="table-responsive">
+    <table class="table table-dark table-hover table-sm" id="log-table">
+      <thead class="text-success">
+        <tr>
+          <th>#</th>
+          <th>Time (UTC)</th>
+          <th>Event</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in activity %}
+        <tr>
+          <td class="text-muted">{{ row.id }}</td>
+          <td class="text-muted small">{{ row.timestamp }}</td>
+          <td class="text-light">{{ row.event }}</td>
+          <td class="text-muted small">{{ row.detail or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-journal-text fs-1 d-block mb-2 opacity-25"></i>
+    No activity logged yet.
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterLogs() {
+  const q = document.getElementById('log-search').value.toLowerCase();
+  document.querySelectorAll('#log-table tbody tr').forEach(row => {
+    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

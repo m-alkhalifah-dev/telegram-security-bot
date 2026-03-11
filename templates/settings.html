@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Settings — SecBot{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h4 class="text-success mb-0"><i class="bi bi-gear me-2"></i>Settings</h4>
+</div>
+
+<div class="row g-3">
+  <!-- Notes -->
+  <div class="col-lg-6">
+    <div class="dash-card p-3">
+      <h6 class="text-success mb-3"><i class="bi bi-sticky me-2"></i>Notes</h6>
+
+      <form method="POST" action="{{ url_for('notes_add') }}" class="mb-3">
+        <div class="input-group input-group-sm">
+          <input type="text" name="content" class="form-control bg-dark border-secondary text-light"
+                 placeholder="Add a note..." maxlength="500" required>
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-plus-lg"></i>
+          </button>
+        </div>
+      </form>
+
+      {% set notes = [] %}
+      {% set notes = namespace(items=[]) %}
+      <div id="notes-list">
+        <div class="text-muted small text-center py-2">Loading notes...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Info -->
+  <div class="col-lg-6">
+    <div class="dash-card p-3">
+      <h6 class="text-success mb-3"><i class="bi bi-info-circle me-2"></i>Bot Info</h6>
+      <table class="table table-sm table-borderless text-muted mb-0">
+        <tr><td>Version</td><td class="text-success fw-bold">v{{ version }}</td></tr>
+        <tr><td>Dashboard</td><td class="text-light">Flask 3.0</td></tr>
+        <tr><td>Platform</td><td class="text-light">Raspberry Pi 5</td></tr>
+        <tr><td>Python</td><td class="text-light" id="py-ver">—</td></tr>
+      </table>
+
+      <hr class="border-secondary">
+
+      <h6 class="text-success mb-2"><i class="bi bi-terminal me-2"></i>Quick Config Reference</h6>
+      <small class="text-muted">Edit <code>config.py</code> on the Pi to change:</small>
+      <ul class="mt-2 text-muted small">
+        <li><code>BOT_TOKEN</code> — Telegram bot token</li>
+        <li><code>ALLOWED_CHAT_IDS</code> — authorised Telegram IDs</li>
+        <li><code>NETWORK_RANGE</code> — local subnet to scan</li>
+        <li><code>ABUSEIPDB_API_KEY</code> — optional abuse lookup</li>
+        <li><code>DASHBOARD_PASS</code> — this dashboard password</li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load notes via API
+fetch('/api/notes')
+  .then(r => r.json())
+  .then(data => {
+    const el = document.getElementById('notes-list');
+    if (!data.notes || data.notes.length === 0) {
+      el.innerHTML = '<div class="text-muted small text-center py-2">No notes yet.</div>';
+      return;
+    }
+    el.innerHTML = data.notes.map(n => `
+      <div class="d-flex justify-content-between align-items-start border-bottom border-secondary pb-2 mb-2">
+        <div>
+          <div class="text-light small">${escHtml(n.content)}</div>
+          <div class="text-muted" style="font-size:0.7rem">${n.timestamp}</div>
+        </div>
+        <form method="POST" action="/notes/delete/${n.id}" class="ms-2">
+          <button class="btn btn-sm btn-outline-danger py-0 px-1">
+            <i class="bi bi-trash"></i>
+          </button>
+        </form>
+      </div>
+    `).join('');
+  });
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Python version
+fetch('/api/stats')
+  .then(r => r.json())
+  .then(d => {
+    // just show uptime info we already have
+  });
+</script>
+{% endblock %}

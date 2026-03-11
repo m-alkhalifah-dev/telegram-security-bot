@@ -1,0 +1,31 @@
+# ============================================================
+# systemd service — runs bot + dashboard together
+# Install:
+#   sudo cp run_all.service /etc/systemd/system/secbot.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable secbot
+#   sudo systemctl start secbot
+# ============================================================
+
+[Unit]
+Description=Telegram Security Bot v2.0 (Bot + Dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=pi
+WorkingDirectory=/home/pi/Desktop/telegram-security-bot
+ExecStart=/home/pi/Desktop/telegram-security-bot/run.sh start
+ExecStop=/home/pi/Desktop/telegram-security-bot/run.sh stop
+ExecReload=/home/pi/Desktop/telegram-security-bot/run.sh restart
+PIDFile=/home/pi/Desktop/telegram-security-bot/.bot.pid
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=append:/home/pi/Desktop/telegram-security-bot/logs/service.log
+StandardError=append:/home/pi/Desktop/telegram-security-bot/logs/service.log
+
+[Install]
+WantedBy=multi-user.target

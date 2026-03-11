@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram Security Bot
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/telegram-security-bot
+ExecStart=/usr/bin/python3 /home/pi/telegram-security-bot/bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

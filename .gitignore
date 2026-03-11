@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Sensitive config — use config.example.py as template
+config.py
+
+# Data files (contain private network info)
+data/known_devices.json
+data/history.db
+data/*.json
+data/*.db
+
+# Bot runtime files
+.bot.pid
+.dash.pid
+
+# Logs
+logs/
+*.log
+
+# Backup files
+backups/
+
+# Screenshots
+/tmp/secbot_screenshot.png
+
+# Environment variables
+.env
+
+# Archives
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

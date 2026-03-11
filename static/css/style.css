@@ -1,0 +1,144 @@
+/* Security Bot Dashboard — dark cybersecurity theme */
+
+:root {
+  --green:      #00ff88;
+  --green-dim:  #00cc66;
+  --bg-dark:    #0a0f0a;
+  --bg-card:    #0f1a0f;
+  --bg-sidebar: #080d08;
+  --border:     rgba(0,255,136,0.15);
+}
+
+body {
+  background: var(--bg-dark);
+  color: #c8d8c8;
+  font-family: 'Courier New', monospace;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+#sidebar {
+  width: 220px;
+  min-height: 100vh;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  transition: width 0.25s ease;
+  overflow: hidden;
+}
+#sidebar.collapsed {
+  width: 0;
+  padding: 0 !important;
+}
+
+#sidebar .nav-link {
+  color: #7a9a7a;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.75rem;
+  transition: all 0.15s;
+}
+#sidebar .nav-link:hover {
+  color: var(--green);
+  background: rgba(0,255,136,0.07);
+}
+#sidebar .nav-link.active {
+  color: var(--green);
+  background: rgba(0,255,136,0.12);
+  border-left: 2px solid var(--green);
+}
+
+/* Top navbar */
+.navbar {
+  background: var(--bg-sidebar) !important;
+}
+
+/* Cards */
+.dash-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+.stat-card:hover {
+  border-color: rgba(0,255,136,0.4);
+}
+.stat-icon { font-size: 1.8rem; margin-bottom: 0.3rem; }
+.stat-label { color: #5a7a5a; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.stat-value { font-size: 1.5rem; font-weight: bold; color: #d0ffd0; }
+
+/* Progress bars */
+.progress { background: #1a2a1a; }
+
+/* Tables */
+.table-dark {
+  --bs-table-bg: transparent;
+  --bs-table-hover-bg: rgba(0,255,136,0.04);
+  font-size: 0.82rem;
+}
+.table thead th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-color: var(--border);
+}
+.table td, .table th { border-color: rgba(255,255,255,0.05); }
+
+/* Badges */
+.badge.bg-success { background-color: var(--green-dim) !important; color: #000 !important; }
+
+/* Text */
+.text-success { color: var(--green) !important; }
+.btn-success  { background: var(--green-dim); border-color: var(--green-dim); color: #000; font-weight: 600; }
+.btn-success:hover { background: var(--green); border-color: var(--green); }
+.btn-outline-success { color: var(--green); border-color: var(--green-dim); }
+.btn-outline-success:hover { background: rgba(0,255,136,0.1); color: var(--green); }
+
+/* Code */
+code { color: var(--green); }
+
+/* Login page */
+.login-body { background: var(--bg-dark); }
+.login-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 0 40px rgba(0,255,136,0.06);
+}
+
+/* Form controls */
+.form-control:focus {
+  border-color: var(--green-dim);
+  box-shadow: 0 0 0 0.2rem rgba(0,255,136,0.15);
+  background: #0f1a0f;
+  color: #d0ffd0;
+}
+.form-select:focus {
+  border-color: var(--green-dim);
+  box-shadow: 0 0 0 0.2rem rgba(0,255,136,0.15);
+}
+
+/* Charts — dark canvas background */
+canvas { border-radius: 4px; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: #1a3a1a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--green-dim); }
+
+/* Status badge pulse */
+#status-badge {
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
