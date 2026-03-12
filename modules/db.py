@@ -52,8 +52,44 @@ def init_db():
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS devices (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                mac        TEXT,
+                ip         TEXT,
+                vendor     TEXT,
+                hostname   TEXT,
+                status     TEXT DEFAULT 'unknown',
+                first_seen TEXT NOT NULL,
+                last_seen  TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS alerts (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp  TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                target     TEXT,
+                detail     TEXT,
+                severity   TEXT DEFAULT 'info'
+            );
         """)
         conn.commit()
+        # Migration: add first_seen / last_seen columns to existing databases
+        for col, default in [("first_seen", "''"), ("last_seen", "''")]:
+            try:
+                conn.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+                conn.commit()
+            except Exception:
+                pass  # column already exists
+        # Rename legacy 'timestamp' column data into last_seen if last_seen is blank
+        try:
+            conn.execute(
+                "UPDATE devices SET last_seen = timestamp, first_seen = timestamp "
+                "WHERE last_seen = '' AND timestamp IS NOT NULL"
+            )
+            conn.commit()
+        except Exception:
+            pass
     finally:
         conn.close()
 
@@ -225,5 +261,106 @@ def get_all_stats() -> dict:
     try:
         rows = conn.execute("SELECT key, value FROM bot_stats").fetchall()
         return {r["key"]: r["value"] for r in rows}
+    finally:
+        conn.close()
+
+
+# ── Devices ───────────────────────────────────────────────────────────────────
+
+def log_device(ip: str, mac: str = "", vendor: str = "", hostname: str = "", status: str = "unknown"):
+    """Insert or update a discovered device record, tracking first_seen and last_seen."""
+    conn = _connect()
+    try:
+        ts = datetime.utcnow().isoformat(timespec='seconds')
+        if mac:
+            existing = conn.execute("SELECT id FROM devices WHERE mac = ?", (mac,)).fetchone()
+            if existing:
+                # Update all fields except first_seen
+                conn.execute(
+                    "UPDATE devices SET last_seen=?, ip=?, vendor=?, hostname=?, status=? WHERE mac=?",
+                    (ts, ip, vendor, hostname, status, mac)
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO devices (mac, ip, vendor, hostname, status, first_seen, last_seen) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (mac, ip, vendor, hostname, status, ts, ts)
+                )
+        else:
+            conn.execute(
+                "INSERT INTO devices (mac, ip, vendor, hostname, status, first_seen, last_seen) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (mac, ip, vendor, hostname, status, ts, ts)
+            )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+def get_devices(limit: int = 100) -> list:
+    """Return recently seen devices."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM devices ORDER BY timestamp DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def clear_devices():
+    """Delete all device records."""
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM devices")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Alerts ────────────────────────────────────────────────────────────────────
+
+def log_alert(alert_type: str, target: str = "", detail: str = "", severity: str = "info"):
+    """Insert a network or security alert."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO alerts (timestamp, alert_type, target, detail, severity) VALUES (?,?,?,?,?)",
+            (datetime.utcnow().isoformat(timespec='seconds'), alert_type, target, detail[:500], severity)
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+def get_alerts(limit: int = 100, alert_type: Optional[str] = None) -> list:
+    """Return recent alerts."""
+    conn = _connect()
+    try:
+        if alert_type:
+            rows = conn.execute(
+                "SELECT * FROM alerts WHERE alert_type=? ORDER BY id DESC LIMIT ?",
+                (alert_type, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM alerts ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def clear_alerts():
+    """Delete all alerts."""
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM alerts")
+        conn.commit()
     finally:
         conn.close()

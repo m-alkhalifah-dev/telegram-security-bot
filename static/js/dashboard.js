@@ -62,11 +62,78 @@ function initNetworkPage() {
     { label: 'TX kbps', data: txHistory, color: '#f07040' },
   ]);
   fetchBandwidth();
+  fetchDevices();
   setInterval(fetchBandwidth, 5000);
+  setInterval(fetchDevices, REFRESH_MS);  // auto-refresh every 30s
+}
+
+function fetchDevices() {
+  fetch('/api/devices')
+    .then(r => r.json())
+    .then(d => {
+      renderDevicesTable(d.devices || []);
+      const countEl = document.getElementById('device-count');
+      if (countEl) countEl.textContent = (d.count || 0) + ' devices';
+      const updEl = document.getElementById('last-updated');
+      if (updEl) updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+    })
+    .catch(() => {});
+}
+
+function runScan() {
+  const btn = document.getElementById('scan-btn');
+  const status = document.getElementById('scan-status');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Scanning…'; }
+  if (status) status.classList.remove('d-none');
+
+  fetch('/api/scan', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) {
+        if (status) { status.classList.remove('d-none'); status.classList.replace('alert-warning', 'alert-danger'); status.innerHTML = '<i class="bi bi-x-circle me-1"></i>' + escHtml(d.error); }
+      } else {
+        renderDevicesTable(d.devices || []);
+        const countEl = document.getElementById('device-count');
+        if (countEl) countEl.textContent = (d.count || 0) + ' devices';
+        if (status) status.classList.add('d-none');
+        const updEl = document.getElementById('last-updated');
+        if (updEl) updEl.textContent = 'Scanned ' + new Date().toLocaleTimeString();
+      }
+    })
+    .catch(() => {
+      if (status) { status.classList.replace('alert-warning', 'alert-danger'); status.innerHTML = '<i class="bi bi-x-circle me-1"></i>Scan request failed'; }
+    })
+    .finally(() => {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-radar me-1"></i>Run Scan'; }
+    });
+}
+
+function renderDevicesTable(devices) {
+  const tbody = document.getElementById('devices-tbody');
+  if (!tbody) return;
+  if (!devices.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No devices found.</td></tr>';
+    return;
+  }
+  let html = '';
+  devices.forEach(d => {
+    const statusBadge = d.status === 'known'
+      ? '<span class="badge bg-success">Known</span>'
+      : '<span class="badge bg-warning text-dark">Unknown</span>';
+    html += `<tr>
+      <td>${statusBadge}</td>
+      <td><code class="text-success">${escHtml(d.mac || '—')}</code></td>
+      <td><code>${escHtml(d.ip || '—')}</code></td>
+      <td class="text-light">${escHtml(d.hostname || d.vendor || '—')}</td>
+      <td class="text-muted small">${escHtml(d.first_seen || '—')}</td>
+      <td class="text-muted small">${escHtml(d.last_seen || '—')}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = html;
 }
 
 function refreshNetwork() {
-  location.reload();
+  fetchDevices();
 }
 
 // ── API fetchers ───────────────────────────────────────────────────────────

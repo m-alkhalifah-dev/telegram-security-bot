@@ -1,9 +1,10 @@
 """
 Threat Intelligence Module
-Latest CVEs/threat feeds from CISA and NVD, IP abuse reputation
+Latest CVEs/threat feeds from CISA and NVD, IP abuse reputation, IP lookup
 """
 
 import asyncio
+import socket
 from datetime import datetime
 from typing import Optional
 
@@ -165,4 +166,106 @@ async def abuse_check(ip: str, api_key: str = '') -> str:
     except Exception as e:
         result += f"❌ *Error:* `{str(e)}`"
 
+    return result
+
+
+async def ip_lookup(ip: str, abuseipdb_key: str = '') -> str:
+    """Comprehensive IP lookup: geo, ISP, ports, abuse score, reverse DNS"""
+    result = f"🔍 *IP Lookup: `{ip}`*\n\n"
+
+    # ── Reverse DNS ────────────────────────────────────────────────────────────
+    try:
+        loop = asyncio.get_event_loop()
+        hostname = await loop.run_in_executor(None, lambda: socket.gethostbyaddr(ip))
+        result += f"🔄 *Reverse DNS:* `{hostname[0]}`\n"
+    except Exception:
+        result += "🔄 *Reverse DNS:* No PTR record\n"
+
+    # ── Geo & ISP via ip-api.com ───────────────────────────────────────────────
+    result += "\n📍 *Geolocation & ISP:*\n"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f'http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,'
+                f'regionName,city,zip,lat,lon,timezone,isp,org,as,proxy,hosting,mobile,query',
+                timeout=aiohttp.ClientTimeout(total=6)
+            ) as resp:
+                data = await resp.json(content_type=None)
+
+        if data.get('status') == 'success':
+            result += f"├ Country: {data.get('country', 'N/A')} ({data.get('countryCode', '')})\n"
+            result += f"├ Region/City: {data.get('regionName', 'N/A')}, {data.get('city', 'N/A')}\n"
+            result += f"├ Coordinates: `{data.get('lat')}, {data.get('lon')}`\n"
+            result += f"├ Timezone: `{data.get('timezone', 'N/A')}`\n"
+            result += f"├ ISP: `{data.get('isp', 'N/A')}`\n"
+            result += f"├ Org: `{data.get('org', 'N/A')}`\n"
+            result += f"├ AS: `{data.get('as', 'N/A')}`\n"
+            flags = []
+            if data.get('proxy'):
+                flags.append('⚠️ Proxy/VPN')
+            if data.get('hosting'):
+                flags.append('🏢 Hosting/DC')
+            if data.get('mobile'):
+                flags.append('📱 Mobile')
+            result += f"└ Flags: {', '.join(flags) if flags else '✅ None'}\n"
+        else:
+            result += f"└ Error: {data.get('message', 'Invalid IP')}\n"
+    except Exception as e:
+        result += f"└ Error: `{str(e)[:60]}`\n"
+
+    # ── Open Ports via HackerTarget ────────────────────────────────────────────
+    result += "\n🔌 *Open Ports (HackerTarget scan):*\n"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f'https://api.hackertarget.com/nmap/?q={ip}',
+                timeout=aiohttp.ClientTimeout(total=20),
+                headers={'User-Agent': 'TelegramSecurityBot/2.0'}
+            ) as resp:
+                text = await resp.text()
+        if 'error' in text.lower() or 'API count' in text:
+            result += "└ ⚠️ HackerTarget rate limit or unavailable\n"
+        else:
+            lines = [l for l in text.splitlines() if '/tcp' in l or '/udp' in l]
+            if lines:
+                for line in lines[:15]:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        result += f"├ `{parts[0]}` — {parts[2]}\n"
+                if len(lines) > 15:
+                    result += f"└ ... and {len(lines)-15} more\n"
+            else:
+                result += "└ No open ports found (or filtered)\n"
+    except Exception as e:
+        result += f"└ Scan error: `{str(e)[:60]}`\n"
+
+    # ── Abuse reputation ───────────────────────────────────────────────────────
+    result += "\n🚨 *Abuse Reputation:*\n"
+    if abuseipdb_key:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    'https://api.abuseipdb.com/api/v2/check',
+                    params={'ipAddress': ip, 'maxAgeInDays': 90},
+                    headers={'Key': abuseipdb_key, 'Accept': 'application/json'},
+                    timeout=aiohttp.ClientTimeout(total=8)
+                ) as resp:
+                    if resp.status == 200:
+                        d = (await resp.json()).get('data', {})
+                        score = d.get('abuseConfidenceScore', 0)
+                        score_emoji = "🔴" if score >= 75 else ("🟡" if score >= 25 else "🟢")
+                        result += f"├ {score_emoji} AbuseIPDB Score: {score}/100\n"
+                        result += f"├ Total reports: {d.get('totalReports', 0)}\n"
+                        result += f"└ Last reported: {d.get('lastReportedAt', 'Never')}\n"
+                    else:
+                        result += f"└ AbuseIPDB HTTP {resp.status}\n"
+        except Exception as e:
+            result += f"└ Error: `{str(e)[:60]}`\n"
+    else:
+        # Fallback: use ip-api proxy/hosting flags as rough threat indicator
+        result += "├ No AbuseIPDB key (add to config.py for full check)\n"
+        result += "└ Use /abusecheck for detailed abuse reputation\n"
+
+    # ── Threat score summary ───────────────────────────────────────────────────
+    result += f"\n📅 Checked: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     return result

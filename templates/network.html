@@ -4,65 +4,69 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <h4 class="text-success mb-0"><i class="bi bi-diagram-3 me-2"></i>Network Devices</h4>
-  <span class="badge bg-success">{{ devices|length }} known devices</span>
+  <span class="badge bg-success" id="device-count">{{ devices|length }} devices</span>
 </div>
 
 <div class="dash-card p-3 mb-4">
-  <div class="d-flex justify-content-between mb-3">
-    <h6 class="text-success mb-0"><i class="bi bi-hdd-network me-2"></i>Known Devices</h6>
-    <button class="btn btn-sm btn-outline-success" onclick="refreshNetwork()">
-      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-    </button>
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h6 class="text-success mb-0"><i class="bi bi-hdd-network me-2"></i>Discovered Devices</h6>
+    <div class="d-flex gap-2 align-items-center">
+      <span class="text-muted small" id="last-updated"></span>
+      <button class="btn btn-sm btn-outline-warning" id="scan-btn" onclick="runScan()">
+        <i class="bi bi-radar me-1"></i>Run Scan
+      </button>
+      <button class="btn btn-sm btn-outline-success" onclick="fetchDevices()">
+        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+      </button>
+    </div>
   </div>
 
-  {% if devices %}
+  <div id="scan-status" class="alert alert-warning d-none py-2 mb-2">
+    <i class="bi bi-hourglass-split me-1"></i>Scanning network, please wait…
+  </div>
+
   <div class="table-responsive">
-    <table class="table table-dark table-hover table-sm">
+    <table class="table table-dark table-hover table-sm" id="devices-table">
       <thead class="text-success">
         <tr>
-          <th>MAC Address</th>
-          <th>Hostname</th>
-          <th>IP</th>
           <th>Status</th>
-          <th>Approved</th>
+          <th>MAC Address</th>
+          <th>IP</th>
+          <th>Vendor / Hostname</th>
           <th>First Seen</th>
           <th>Last Seen</th>
         </tr>
       </thead>
-      <tbody>
-        {% for mac, info in devices.items() %}
-        <tr>
-          <td><code class="text-success">{{ mac }}</code></td>
-          <td>{{ info.get('hostname', '—') }}</td>
-          <td><code>{{ info.get('ip', '—') }}</code></td>
-          <td>
-            {% if info.get('status') == 'online' %}
-              <span class="badge bg-success">Online</span>
-            {% else %}
-              <span class="badge bg-secondary">Offline</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if info.get('approved') %}
-              <i class="bi bi-check-circle-fill text-success"></i>
-            {% else %}
-              <i class="bi bi-exclamation-circle-fill text-warning"></i>
-            {% endif %}
-          </td>
-          <td class="text-muted small">{{ info.get('first_seen', '—') }}</td>
-          <td class="text-muted small">{{ info.get('last_seen', '—') }}</td>
-        </tr>
-        {% endfor %}
+      <tbody id="devices-tbody">
+        {% if devices %}
+          {% for d in devices %}
+          <tr>
+            <td>
+              {% if d.status == 'known' %}
+                <span class="badge bg-success">Known</span>
+              {% else %}
+                <span class="badge bg-warning text-dark">Unknown</span>
+              {% endif %}
+            </td>
+            <td><code class="text-success">{{ d.mac or '—' }}</code></td>
+            <td><code>{{ d.ip or '—' }}</code></td>
+            <td class="text-light">{{ d.hostname or d.vendor or '—' }}</td>
+            <td class="text-muted small">{{ d.first_seen or '—' }}</td>
+            <td class="text-muted small">{{ d.last_seen or '—' }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr id="empty-row">
+            <td colspan="6" class="text-center py-5 text-muted">
+              <i class="bi bi-diagram-3 fs-1 d-block mb-2 opacity-25"></i>
+              No devices in database yet.<br>
+              <small>Click <strong>Run Scan</strong> or use <code>/scan</code> in the bot.</small>
+            </td>
+          </tr>
+        {% endif %}
       </tbody>
     </table>
   </div>
-  {% else %}
-  <div class="text-center py-5 text-muted">
-    <i class="bi bi-diagram-3 fs-1 d-block mb-2 opacity-25"></i>
-    No devices discovered yet.<br>
-    <small>Run <code>/scan</code> in the bot to discover devices.</small>
-  </div>
-  {% endif %}
 </div>
 
 <div class="dash-card p-3">

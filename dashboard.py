@@ -25,7 +25,8 @@ from config import (
 )
 from modules.db import (
     init_db, get_scan_history, get_notes, add_note, delete_note,
-    get_activity_log, get_all_stats, log_activity, clear_scan_history
+    get_activity_log, get_all_stats, log_activity, clear_scan_history,
+    get_devices, log_device, log_scan,
 )
 
 app = Flask(__name__)
@@ -100,14 +101,7 @@ def index():
 @app.route('/network')
 @login_required
 def network():
-    known_file = os.path.join(os.path.dirname(__file__), 'data', 'known_devices.json')
-    devices = {}
-    if os.path.exists(known_file):
-        try:
-            with open(known_file) as f:
-                devices = json.load(f)
-        except Exception:
-            pass
+    devices = get_devices(limit=100)
     return render_template('network.html', devices=devices, version=BOT_VERSION)
 
 
@@ -210,14 +204,88 @@ def api_bandwidth():
 @login_required
 @rate_limited
 def api_network():
-    known_file = os.path.join(os.path.dirname(__file__), 'data', 'known_devices.json')
-    devices = {}
-    if os.path.exists(known_file):
+    devices = get_devices(limit=100)
+    return jsonify({"devices": devices, "count": len(devices)})
+
+
+@app.route('/api/devices')
+@login_required
+@rate_limited
+def api_devices():
+    devices = get_devices(limit=100)
+    return jsonify({"devices": devices, "count": len(devices)})
+
+
+@app.route('/api/scan', methods=['POST'])
+@login_required
+@rate_limited
+def api_scan():
+    """Trigger a network scan, save results to DB, return discovered devices."""
+    from config import NETWORK_RANGE, KNOWN_DEVICES_FILE
+    found = {}
+
+    # Try arp-scan first
+    try:
+        result = subprocess.run(
+            ['sudo', 'arp-scan', '--localnet', '--retry=2'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                parts = line.split('\t')
+                if len(parts) >= 2 and '.' in parts[0]:
+                    ip = parts[0].strip()
+                    mac = parts[1].strip().upper()
+                    vendor = parts[2].strip() if len(parts) > 2 else "Unknown"
+                    found[mac] = {'ip': ip, 'mac': mac, 'vendor': vendor}
+    except Exception:
+        pass
+
+    # Fallback: nmap ping scan
+    if not found:
         try:
-            with open(known_file) as f:
-                devices = json.load(f)
+            result = subprocess.run(
+                ['nmap', '-sn', NETWORK_RANGE],
+                capture_output=True, text=True, timeout=60
+            )
+            current_ip = None
+            for line in result.stdout.split('\n'):
+                if 'Nmap scan report for' in line:
+                    current_ip = line.split()[-1].strip('()')
+                elif 'MAC Address:' in line and current_ip:
+                    parts = line.split()
+                    mac = parts[2].upper()
+                    vendor = ' '.join(parts[3:]).strip('()')
+                    found[mac] = {'ip': current_ip, 'mac': mac, 'vendor': vendor}
+                    current_ip = None
         except Exception:
             pass
+
+    if not found:
+        return jsonify({"error": "Scan failed — arp-scan and nmap both unavailable", "devices": []}), 500
+
+    # Load known devices to set status
+    known = {}
+    if os.path.exists(KNOWN_DEVICES_FILE):
+        try:
+            with open(KNOWN_DEVICES_FILE) as f:
+                known = json.load(f)
+        except Exception:
+            pass
+
+    for mac, info in found.items():
+        status = "known" if mac in known else "unknown"
+        log_device(
+            ip=info['ip'], mac=mac, vendor=info['vendor'],
+            hostname=known.get(mac, {}).get('name', ''), status=status
+        )
+
+    log_scan("network_scan", "local",
+             f"Dashboard scan: {len(found)} device(s) found",
+             f"Devices: {list(found.keys())}")
+    log_activity("network_scan", f"Dashboard triggered: {len(found)} devices")
+
+    devices = get_devices(limit=100)
     return jsonify({"devices": devices, "count": len(devices)})
 
 

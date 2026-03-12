@@ -394,6 +394,78 @@ async def backup_bot(bot_dir: str = '/home/pi/Desktop/telegram-security-bot') ->
     return result
 
 
+async def daily_report_content() -> str:
+    """Generate a daily summary report: system health + disk + network"""
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    result = f"📅 *Daily Security Report*\n_{now}_\n\n"
+
+    # ── System Health ──────────────────────────────────────────────────────────
+    result += "📊 *System Health:*\n"
+    try:
+        cpu = psutil.cpu_percent(interval=1)
+        ram = psutil.virtual_memory()
+        result += f"├ CPU: `{cpu:.1f}%`\n"
+        result += f"├ RAM: `{ram.percent:.1f}%` ({ram.used // 1024**2} MB / {ram.total // 1024**2} MB)\n"
+    except Exception:
+        result += "├ CPU/RAM: unavailable\n"
+
+    try:
+        temps = psutil.sensors_temperatures()
+        if 'cpu_thermal' in temps:
+            result += f"├ Temp: `{temps['cpu_thermal'][0].current:.1f}°C`\n"
+    except Exception:
+        try:
+            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                temp = int(f.read().strip()) / 1000
+            result += f"├ Temp: `{temp:.1f}°C`\n"
+        except Exception:
+            pass
+
+    try:
+        disk = psutil.disk_usage('/')
+        result += f"└ Disk: `{disk.percent:.1f}%` used ({disk.used // 1024**3} GB / {disk.total // 1024**3} GB)\n"
+    except Exception:
+        result += "└ Disk: unavailable\n"
+
+    # ── Network Stats ──────────────────────────────────────────────────────────
+    result += "\n🌐 *Network I/O (since boot):*\n"
+    try:
+        net = psutil.net_io_counters()
+        result += f"├ Sent: `{net.bytes_sent / 1024**3:.2f} GB`\n"
+        result += f"└ Received: `{net.bytes_recv / 1024**3:.2f} GB`\n"
+    except Exception:
+        result += "└ Network stats: unavailable\n"
+
+    # ── Running Services Count ─────────────────────────────────────────────────
+    result += "\n⚙️ *Services:*\n"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'systemctl', 'list-units', '--type=service', '--state=running', '--no-pager',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8)
+        lines = [l for l in stdout.decode().splitlines() if '.service' in l]
+        result += f"└ Running services: `{len(lines)}`\n"
+    except Exception:
+        result += "└ Services: unavailable\n"
+
+    # ── Uptime ────────────────────────────────────────────────────────────────
+    result += "\n⏱ *Uptime:*\n"
+    try:
+        boot_time = psutil.boot_time()
+        uptime_secs = int(datetime.now().timestamp() - boot_time)
+        days, rem = divmod(uptime_secs, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes = rem // 60
+        result += f"└ `{days}d {hours}h {minutes}m`\n"
+    except Exception:
+        result += "└ Uptime: unavailable\n"
+
+    result += "\n💡 Use /status for live metrics, /devices for network scan"
+    return result
+
+
 async def get_resource_value(resource: str) -> float:
     """Get current value of CPU/RAM/TEMP for alert monitoring"""
     r = resource.upper()

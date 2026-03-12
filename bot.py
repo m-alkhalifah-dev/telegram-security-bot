@@ -10,7 +10,7 @@ import asyncio
 import os
 import time
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 
 import aiohttp
@@ -26,7 +26,10 @@ from config import (
     BOT_TOKEN, ALLOWED_CHAT_IDS, SCAN_INTERVAL, ABUSEIPDB_API_KEY,
     BOT_VERSION, DASHBOARD_ENABLED, DASHBOARD_HOST, DASHBOARD_PORT,
 )
-from modules.db import init_db, add_note, get_notes, delete_note, log_activity, increment_stat
+from modules.db import (
+    init_db, add_note, get_notes, delete_note,
+    log_activity, increment_stat, log_scan, log_device, log_alert,
+)
 from modules.system import get_system_status, get_top_processes
 from modules.network import ping_host, port_scan, check_website, check_ssl, get_public_ip
 from modules.monitor import NetworkMonitor
@@ -39,8 +42,9 @@ from modules.crypto_tools import encode_text, decode_text, gen_hash, gen_passwor
 from modules.sysadmin import (
     list_cron_jobs, list_users, disk_usage, list_services,
     check_updates, get_history, backup_bot, get_resource_value,
+    daily_report_content,
 )
-from modules.threat import get_threat_feed, abuse_check
+from modules.threat import get_threat_feed, abuse_check, ip_lookup
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -60,6 +64,11 @@ bot_start_time = time.time()
 
 # Active timers: {chat_id: asyncio.Task}
 active_timers: dict = {}
+
+# Daily report: {chat_id: "HH:MM"}
+daily_report_schedule: dict = {}
+# Daily report tasks: {chat_id: asyncio.Task}
+daily_report_tasks: dict = {}
 
 
 # ============================================================
@@ -155,7 +164,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "└ /genpass `[length]` — secure password gen\n\n"
         "🌍 *Threat Intelligence:*\n"
         "├ /threatfeed — latest CISA KEV + NVD CVEs\n"
-        "└ /abusecheck `[IP]` — AbuseIPDB reputation\n\n"
+        "├ /abusecheck `[IP]` — AbuseIPDB reputation\n"
+        "└ /iplookup `[IP]` — full IP: geo, ports, abuse\n\n"
         "🧰 *Utilities:*\n"
         "├ /dashboard — web dashboard link\n"
         "├ /screenshot — Pi desktop screenshot\n"
@@ -165,7 +175,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ /notes `[add|list|del]` — manage notes\n"
         "├ /timer `[seconds]` — countdown timer\n"
         "├ /botinfo — bot version & stats\n"
-        "└ /changelog — what's new in v2.0\n\n"
+        "├ /changelog — what's new in v2.0\n"
+        "└ /dailyreport `[on|off]` — scheduled daily summary\n\n"
         "💡 Use /help for usage examples"
     )
     await update.message.reply_text(msg1, parse_mode='Markdown')
@@ -208,7 +219,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "└ `/alert TEMP 75`\n\n"
         "*Threat Intel:*\n"
         "├ `/threatfeed`\n"
-        "└ `/abusecheck 1.2.3.4`\n\n"
+        "├ `/abusecheck 1.2.3.4`\n"
+        "└ `/iplookup 8.8.8.8`\n\n"
+        "*Automation:*\n"
+        "├ `/dailyreport on` — enable daily report at 08:00\n"
+        "├ `/dailyreport on 07:30` — enable at custom time\n"
+        "└ `/dailyreport off` — disable\n\n"
         "⚠️ Only scan systems you are authorized to test."
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
@@ -387,7 +403,10 @@ async def portscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = context.args[0]
     ports  = context.args[1] if len(context.args) > 1 else "common"
     await update.message.reply_text(f"Scanning `{target}`...", parse_mode='Markdown')
-    await send_long(update, await port_scan(target, ports))
+    result = await port_scan(target, ports)
+    log_scan("portscan", target, f"Port scan on {target} (ports: {ports})", result)
+    log_activity("portscan", target)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -400,7 +419,10 @@ async def checksite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     url = context.args[0]
     await update.message.reply_text(f"Checking `{url}`...", parse_mode='Markdown')
-    await send_long(update, await check_website(url))
+    result = await check_website(url)
+    log_scan("checksite", url, f"Site check: {url}", result)
+    log_activity("checksite", url)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -413,13 +435,30 @@ async def ssl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     domain = context.args[0]
     await update.message.reply_text(f"Checking SSL for `{domain}`...", parse_mode='Markdown')
-    await send_long(update, await check_ssl(domain))
+    result = await check_ssl(domain)
+    log_scan("ssl", domain, f"SSL check: {domain}", result)
+    log_activity("ssl_check", domain)
+    await send_long(update, result)
 
 
 @authorized_only
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Scanning local network...")
-    await network_monitor.scan_network()
+    devices = await network_monitor.scan_network()
+    # Save each discovered device to the database
+    known = network_monitor.known_devices
+    for mac, info in devices.items():
+        status = "known" if mac in known else "unknown"
+        log_device(
+            ip=info.get('ip', ''),
+            mac=mac,
+            vendor=info.get('vendor', ''),
+            hostname=known.get(mac, {}).get('name', ''),
+            status=status,
+        )
+    log_scan("network_scan", "local", f"Network scan: {len(devices)} device(s) found",
+             f"Devices: {list(devices.keys())}")
+    log_activity("network_scan", f"{len(devices)} devices found")
     await send_long(update, network_monitor.get_devices_list())
 
 
@@ -486,6 +525,19 @@ async def background_monitor(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
         try:
             new_devices = await network_monitor.check_new_devices()
             for device in new_devices:
+                # Save new device and alert to database
+                log_device(
+                    ip=device.get('ip', ''),
+                    mac=device.get('mac', ''),
+                    vendor=device.get('vendor', ''),
+                    status='unknown',
+                )
+                log_alert(
+                    alert_type="new_device",
+                    target=device.get('ip', ''),
+                    detail=f"New device: MAC={device.get('mac','')} Vendor={device.get('vendor','')}",
+                    severity="warning",
+                )
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=network_monitor.format_alert(device),
@@ -510,7 +562,10 @@ async def whois_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     domain = context.args[0]
     await update.message.reply_text(f"Looking up `{domain}`...", parse_mode='Markdown')
-    await send_long(update, await whois_lookup(domain))
+    result = await whois_lookup(domain)
+    log_scan("whois", domain, f"WHOIS: {domain}", result)
+    log_activity("whois_lookup", domain)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -523,7 +578,10 @@ async def dns_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     domain = context.args[0]
     await update.message.reply_text(f"Fetching DNS records for `{domain}`...", parse_mode='Markdown')
-    await send_long(update, await dns_lookup(domain))
+    result = await dns_lookup(domain)
+    log_scan("dns", domain, f"DNS lookup: {domain}", result)
+    log_activity("dns_lookup", domain)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -536,7 +594,10 @@ async def geoip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     ip = context.args[0]
     await update.message.reply_text(f"Looking up `{ip}`...", parse_mode='Markdown')
-    await send_long(update, await geoip_lookup(ip))
+    result = await geoip_lookup(ip)
+    log_scan("geoip", ip, f"GeoIP: {ip}", result)
+    log_activity("geoip_lookup", ip)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -549,7 +610,10 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     domain = context.args[0]
     await update.message.reply_text(f"Building full report for `{domain}`... (~30s)", parse_mode='Markdown')
-    await send_long(update, await full_domain_report(domain))
+    result = await full_domain_report(domain)
+    log_scan("domain_report", domain, f"Full domain report: {domain}", result)
+    log_activity("domain_report", domain)
+    await send_long(update, result)
 
 
 # ============================================================
@@ -565,7 +629,10 @@ async def vulnscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     url = context.args[0]
     await update.message.reply_text(f"Scanning `{url}` for vulnerabilities (~30s)...", parse_mode='Markdown')
-    await send_long(update, await vuln_scan(url))
+    result = await vuln_scan(url)
+    log_scan("vulnscan", url, f"Vuln scan: {url}", result)
+    log_activity("vulnscan", url)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -578,7 +645,10 @@ async def subdomains_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     domain = context.args[0].lower().strip()
     await update.message.reply_text(f"Enumerating subdomains for `{domain}` via crt.sh...", parse_mode='Markdown')
-    await send_long(update, await find_subdomains(domain))
+    result = await find_subdomains(domain)
+    log_scan("subdomains", domain, f"Subdomain enum: {domain}", result)
+    log_activity("subdomains", domain)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -591,7 +661,10 @@ async def techdetect_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     url = context.args[0]
     await update.message.reply_text(f"Detecting technologies on `{url}`...", parse_mode='Markdown')
-    await send_long(update, await tech_detect(url))
+    result = await tech_detect(url)
+    log_scan("techdetect", url, f"Tech detect: {url}", result)
+    log_activity("techdetect", url)
+    await send_long(update, result)
 
 
 @authorized_only
@@ -604,7 +677,10 @@ async def emailsec_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     domain = context.args[0].lower().strip()
     await update.message.reply_text(f"Checking email security for `{domain}`...", parse_mode='Markdown')
-    await send_long(update, await email_security_check(domain))
+    result = await email_security_check(domain)
+    log_scan("emailsec", domain, f"Email security: {domain}", result)
+    log_activity("emailsec", domain)
+    await send_long(update, result)
 
 
 # ============================================================
@@ -850,7 +926,10 @@ async def certscan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     domain = context.args[0]
     await update.message.reply_text(f"Deep TLS scan for `{domain}`...", parse_mode='Markdown')
-    await send_long(update, await cert_scan(domain))
+    result = await cert_scan(domain)
+    log_scan("certscan", domain, f"TLS/cert scan: {domain}", result)
+    log_activity("certscan", domain)
+    await send_long(update, result)
 
 
 # ============================================================
@@ -873,7 +952,128 @@ async def abusecheck_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     ip = context.args[0]
     await update.message.reply_text(f"Checking `{ip}` on AbuseIPDB...", parse_mode='Markdown')
-    await send_long(update, await abuse_check(ip, ABUSEIPDB_API_KEY))
+    result = await abuse_check(ip, ABUSEIPDB_API_KEY)
+    log_scan("abusecheck", ip, f"AbuseIPDB check: {ip}", result)
+    log_activity("abusecheck", ip)
+    await send_long(update, result)
+
+
+@authorized_only
+async def iplookup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comprehensive IP lookup: geo, ISP, ports, abuse score"""
+    if not context.args:
+        await update.message.reply_text(
+            "❓ *Usage:* `/iplookup [IP]`\n"
+            "*Example:* `/iplookup 8.8.8.8`\n\n"
+            "Shows: location, ISP, open ports, abuse reputation",
+            parse_mode='Markdown'
+        )
+        return
+    ip = context.args[0]
+    await update.message.reply_text(f"🔍 Looking up `{ip}`...", parse_mode='Markdown')
+    await send_long(update, await ip_lookup(ip, ABUSEIPDB_API_KEY))
+
+
+@authorized_only
+async def dailyreport_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Enable/disable daily auto-report: /dailyreport on [HH:MM] | off"""
+    chat_id = update.effective_chat.id
+
+    if not context.args:
+        current = daily_report_schedule.get(chat_id)
+        status = f"✅ Enabled at `{current}`" if current else "❌ Disabled"
+        await update.message.reply_text(
+            f"📅 *Daily Report*\n\n"
+            f"Status: {status}\n\n"
+            f"*Usage:*\n"
+            f"├ `/dailyreport on` — enable at 08:00\n"
+            f"├ `/dailyreport on 07:30` — enable at custom time\n"
+            f"└ `/dailyreport off` — disable",
+            parse_mode='Markdown'
+        )
+        return
+
+    action = context.args[0].lower()
+
+    if action == 'off':
+        if chat_id in daily_report_tasks:
+            daily_report_tasks[chat_id].cancel()
+            del daily_report_tasks[chat_id]
+        daily_report_schedule.pop(chat_id, None)
+        await update.message.reply_text("⏹ *Daily report disabled*", parse_mode='Markdown')
+        return
+
+    if action == 'on':
+        # Parse optional time argument
+        time_str = context.args[1] if len(context.args) > 1 else '08:00'
+        try:
+            hour, minute = map(int, time_str.split(':'))
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError
+        except (ValueError, AttributeError):
+            await update.message.reply_text(
+                "❌ Invalid time format. Use `HH:MM` (e.g. `08:00`)",
+                parse_mode='Markdown'
+            )
+            return
+
+        time_str = f"{hour:02d}:{minute:02d}"
+
+        # Cancel any existing task
+        if chat_id in daily_report_tasks:
+            daily_report_tasks[chat_id].cancel()
+
+        daily_report_schedule[chat_id] = time_str
+        task = asyncio.create_task(_daily_report_loop(context, chat_id, hour, minute))
+        daily_report_tasks[chat_id] = task
+
+        await update.message.reply_text(
+            f"✅ *Daily report enabled*\n"
+            f"📅 Will send every day at `{time_str}`\n\n"
+            f"Use `/dailyreport off` to disable",
+            parse_mode='Markdown'
+        )
+        return
+
+    await update.message.reply_text(
+        "❓ Use `/dailyreport on [HH:MM]` or `/dailyreport off`",
+        parse_mode='Markdown'
+    )
+
+
+async def _daily_report_loop(context: ContextTypes.DEFAULT_TYPE, chat_id: int, hour: int, minute: int):
+    """Background task: send daily report at the scheduled time."""
+    logger.info(f"Daily report loop started for chat {chat_id} at {hour:02d}:{minute:02d}")
+    while daily_report_schedule.get(chat_id):
+        try:
+            now = datetime.now()
+            target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            wait_secs = (target - datetime.now()).total_seconds()
+            if wait_secs > 0:
+                await asyncio.sleep(wait_secs)
+
+            # Generate and send report
+            if daily_report_schedule.get(chat_id):
+                report = await daily_report_content()
+                try:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=report,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"Daily report sent to chat {chat_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send daily report to {chat_id}: {e}")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Daily report loop error for {chat_id}: {e}")
+            await asyncio.sleep(3600)  # Retry in 1 hour on error
+
+    logger.info(f"Daily report loop stopped for chat {chat_id}")
 
 
 # ============================================================
@@ -1246,6 +1446,8 @@ async def post_init(application: Application):
         # Threat intel
         BotCommand("threatfeed",    "Latest CVEs from CISA+NVD"),
         BotCommand("abusecheck",    "AbuseIPDB IP reputation"),
+        BotCommand("iplookup",      "Full IP info: geo, ports, abuse"),
+        BotCommand("dailyreport",   "Scheduled daily system report"),
         # Utilities
         BotCommand("dashboard",     "Open web dashboard"),
         BotCommand("screenshot",    "Pi desktop screenshot"),
@@ -1332,6 +1534,8 @@ def main():
     # Threat intel
     app.add_handler(CommandHandler("threatfeed",     threatfeed_command))
     app.add_handler(CommandHandler("abusecheck",     abusecheck_command))
+    app.add_handler(CommandHandler("iplookup",       iplookup_command))
+    app.add_handler(CommandHandler("dailyreport",    dailyreport_command))
     # Utilities (v2.0)
     app.add_handler(CommandHandler("dashboard",      dashboard_command))
     app.add_handler(CommandHandler("screenshot",     screenshot_command))
