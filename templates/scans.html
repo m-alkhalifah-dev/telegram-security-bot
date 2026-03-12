@@ -1,70 +1,235 @@
 {% extends "base.html" %}
-{% block title %}Scan History — SecBot{% endblock %}
+{% block title %}Scans — SecBot SOC{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h4 class="text-success mb-0"><i class="bi bi-search me-2"></i>Scan History</h4>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h5 class="text-success mb-0 fw-bold"><i class="bi bi-search me-2"></i>Security Scans</h5>
+    <small class="text-muted">Run scans and view history</small>
+  </div>
   <div class="d-flex gap-2">
-    <select class="form-select form-select-sm bg-dark border-secondary text-light" id="type-filter" onchange="filterScans()">
-      <option value="">All types</option>
-      <option value="vulnscan">VulnScan</option>
-      <option value="portscan">PortScan</option>
-      <option value="dns">DNS</option>
-      <option value="whois">WHOIS</option>
-      <option value="ssl">SSL</option>
-      <option value="subdomains">Subdomains</option>
-    </select>
-    <form method="POST" action="{{ url_for('scans_clear') }}" onsubmit="return confirm('Clear all scan history?')">
-      <button type="submit" class="btn btn-sm btn-outline-danger">
-        <i class="bi bi-trash me-1"></i>Clear
-      </button>
-    </form>
+    <a href="/api/report/full" class="btn btn-outline-success btn-sm">
+      <i class="bi bi-file-pdf me-1"></i>Full Report PDF
+    </a>
   </div>
 </div>
 
+<!-- Scan launcher -->
+<div class="dash-card p-3 mb-4">
+  <h6 class="text-success mb-3"><i class="bi bi-play-circle me-2"></i>Run a Scan</h6>
+  <div class="row g-3">
+    <!-- Scan type selector -->
+    <div class="col-md-3">
+      <label class="form-label text-muted small">Scan Type</label>
+      <select id="scan-type" class="form-select form-select-sm" onchange="updateScanForm()">
+        <option value="website">Website Vulnerability</option>
+        <option value="ports">Port Scan</option>
+        <option value="dns">DNS Lookup</option>
+        <option value="whois">WHOIS Lookup</option>
+        <option value="ssl">SSL Check</option>
+        <option value="tech">Tech Detection</option>
+        <option value="subdomains">Subdomain Finder</option>
+        <option value="email">Email Security</option>
+      </select>
+    </div>
+    <!-- Target input -->
+    <div class="col-md-6">
+      <label class="form-label text-muted small" id="target-label">Target URL</label>
+      <input type="text" id="scan-target" class="form-control form-control-sm font-mono"
+             placeholder="https://example.com">
+    </div>
+    <!-- Run button -->
+    <div class="col-md-3 d-flex align-items-end">
+      <button class="btn btn-success btn-sm w-100" onclick="runDashboardScan()">
+        <i class="bi bi-search me-1"></i>Run Scan
+        <span class="spinner-border spinner-border-sm ms-2 d-none" id="scan-spinner"></span>
+      </button>
+    </div>
+  </div>
+  <!-- Scan result area -->
+  <div id="scan-result-area" class="mt-3 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="text-success mb-0"><i class="bi bi-file-text me-2"></i>Scan Result</h6>
+      <button class="btn btn-xs btn-outline-secondary" onclick="exportScanResult()">
+        <i class="bi bi-download me-1"></i>Export
+      </button>
+    </div>
+    <div id="scan-result" class="scan-result-box font-mono small"></div>
+  </div>
+</div>
+
+<!-- Scan history -->
 <div class="dash-card p-3">
-  {% if history %}
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h6 class="text-success mb-0"><i class="bi bi-clock-history me-2"></i>Scan History</h6>
+    <div class="d-flex gap-2 flex-wrap">
+      <select id="history-type-filter" class="form-select form-select-sm" style="width:150px" onchange="filterHistory()">
+        <option value="">All Types</option>
+        {% for st in scan_types %}
+        <option value="{{ st }}">{{ st }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" id="history-search" class="form-control form-control-sm"
+             placeholder="Search target..." style="width:180px" onkeyup="filterHistory()">
+      <form method="POST" action="{{ url_for('scans_clear') }}" class="d-inline"
+            onsubmit="return confirm('Clear all scan history?')">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-danger">
+          <i class="bi bi-trash me-1"></i>Clear All
+        </button>
+      </form>
+    </div>
+  </div>
   <div class="table-responsive">
-    <table class="table table-dark table-hover table-sm" id="scans-table">
-      <thead class="text-success">
+    <table class="table table-dark table-hover table-sm align-middle" id="history-table">
+      <thead>
         <tr>
-          <th>#</th>
-          <th>Time (UTC)</th>
+          <th>Time</th>
           <th>Type</th>
           <th>Target</th>
           <th>Summary</th>
+          <th>Actions</th>
         </tr>
       </thead>
-      <tbody>
-        {% for row in history %}
-        <tr data-type="{{ row.scan_type }}">
-          <td class="text-muted">{{ row.id }}</td>
-          <td class="text-muted small">{{ row.timestamp }}</td>
-          <td><span class="badge bg-success">{{ row.scan_type }}</span></td>
-          <td><code class="text-light">{{ row.target[:40] }}</code></td>
-          <td class="text-muted small">{{ row.result_summary[:80] if row.result_summary else '—' }}</td>
+      <tbody id="history-tbody">
+        {% for scan in history %}
+        <tr class="history-row" data-type="{{ scan.scan_type }}" data-target="{{ scan.target }}">
+          <td class="small text-muted">{{ scan.timestamp }}</td>
+          <td><span class="badge bg-secondary-subtle text-secondary">{{ scan.scan_type }}</span></td>
+          <td class="font-mono small">{{ scan.target[:40] }}</td>
+          <td class="small text-muted">{{ scan.result_summary[:80] if scan.result_summary else '&#x2014;' }}</td>
+          <td>
+            {% if scan.full_result %}
+            <button class="btn btn-xs btn-outline-info"
+                    onclick="showScanDetail(this.dataset.result)"
+                    data-result="{{ scan.full_result | truncate(5000) | e }}"
+                    title="View full result">
+              <i class="bi bi-eye"></i>
+            </button>
+            {% endif %}
+          </td>
         </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted py-4">No scan history yet</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  {% else %}
-  <div class="text-center py-5 text-muted">
-    <i class="bi bi-search fs-1 d-block mb-2 opacity-25"></i>
-    No scan history yet.<br>
-    <small>Scans run via bot commands are recorded here.</small>
+</div>
+
+<!-- Scan detail modal -->
+<div class="modal fade" id="scanDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark border border-success border-opacity-25">
+      <div class="modal-header border-success border-opacity-25">
+        <h5 class="modal-title text-success"><i class="bi bi-file-text me-2"></i>Scan Result</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <pre id="scan-detail-content" class="scan-result-box font-mono small"></pre>
+      </div>
+      <div class="modal-footer border-success border-opacity-25">
+        <button class="btn btn-outline-success btn-sm" onclick="exportModalResult()">
+          <i class="bi bi-download me-1"></i>Export as Text
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
   </div>
-  {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-function filterScans() {
-  const type = document.getElementById('type-filter').value.toLowerCase();
-  document.querySelectorAll('#scans-table tbody tr').forEach(row => {
-    row.style.display = (!type || row.dataset.type === type) ? '' : 'none';
+const SCAN_LABELS = {
+  website: {label: 'Target URL', placeholder: 'https://example.com'},
+  ports: {label: 'Target IP/Host', placeholder: '192.168.1.1'},
+  dns: {label: 'Domain', placeholder: 'example.com'},
+  whois: {label: 'Domain', placeholder: 'example.com'},
+  ssl: {label: 'Domain', placeholder: 'example.com'},
+  tech: {label: 'Target URL', placeholder: 'https://example.com'},
+  subdomains: {label: 'Domain', placeholder: 'example.com'},
+  email: {label: 'Domain', placeholder: 'example.com'},
+};
+
+function updateScanForm() {
+  const type = document.getElementById('scan-type').value;
+  const info = SCAN_LABELS[type] || {};
+  document.getElementById('target-label').textContent = info.label || 'Target';
+  document.getElementById('scan-target').placeholder = info.placeholder || '';
+}
+
+async function runDashboardScan() {
+  const type = document.getElementById('scan-type').value;
+  const target = document.getElementById('scan-target').value.trim();
+  if (!target) { showToast('Enter a target first', 'warning'); return; }
+
+  const spinner = document.getElementById('scan-spinner');
+  const resultArea = document.getElementById('scan-result-area');
+  const resultEl = document.getElementById('scan-result');
+  spinner.classList.remove('d-none');
+  resultArea.classList.remove('d-none');
+  resultEl.textContent = 'Running scan... please wait.';
+
+  const bodyMap = {
+    website: {url: target}, ports: {target}, dns: {domain: target},
+    whois: {domain: target}, ssl: {domain: target}, tech: {url: target},
+    subdomains: {domain: target}, email: {domain: target},
+  };
+
+  try {
+    const resp = await fetch(`/api/scan/${type}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(bodyMap[type] || {target}),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      resultEl.textContent = 'Error: ' + data.error;
+    } else {
+      resultEl.textContent = data.result || JSON.stringify(data, null, 2);
+      showToast('Scan complete!', 'success');
+      setTimeout(() => location.reload(), 1000);
+    }
+  } catch(e) {
+    resultEl.textContent = 'Request failed: ' + e.message;
+  }
+  spinner.classList.add('d-none');
+}
+
+function filterHistory() {
+  const search = document.getElementById('history-search').value.toLowerCase();
+  const typeFilter = document.getElementById('history-type-filter').value.toLowerCase();
+  document.querySelectorAll('#history-tbody .history-row').forEach(row => {
+    const target = row.dataset.target.toLowerCase();
+    const type = row.dataset.type.toLowerCase();
+    const matchSearch = !search || target.includes(search);
+    const matchType = !typeFilter || type === typeFilter;
+    row.style.display = matchSearch && matchType ? '' : 'none';
   });
+}
+
+function showScanDetail(content) {
+  document.getElementById('scan-detail-content').textContent = content;
+  new bootstrap.Modal(document.getElementById('scanDetailModal')).show();
+}
+
+function exportScanResult() {
+  const content = document.getElementById('scan-result').textContent;
+  const blob = new Blob([content], {type: 'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `scan_result_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.txt`;
+  a.click();
+}
+
+function exportModalResult() {
+  const content = document.getElementById('scan-detail-content').textContent;
+  const blob = new Blob([content], {type: 'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `scan_result_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.txt`;
+  a.click();
 }
 </script>
 {% endblock %}

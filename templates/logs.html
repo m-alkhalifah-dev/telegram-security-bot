@@ -1,55 +1,170 @@
 {% extends "base.html" %}
-{% block title %}Activity Log — SecBot{% endblock %}
+{% block title %}Logs — SecBot SOC{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h4 class="text-success mb-0"><i class="bi bi-journal-text me-2"></i>Activity Log</h4>
-  <div class="d-flex gap-2 align-items-center">
-    <input type="text" id="log-search" class="form-control form-control-sm bg-dark border-secondary text-light"
-           placeholder="Filter events..." oninput="filterLogs()" style="width:200px">
-    <span class="badge bg-secondary">{{ activity|length }} entries</span>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h5 class="text-success mb-0 fw-bold"><i class="bi bi-journal-text me-2"></i>Logs &amp; Alerts</h5>
+    <small class="text-muted">Activity log, SSH attempts, security alerts</small>
   </div>
 </div>
 
-<div class="dash-card p-3">
-  {% if activity %}
-  <div class="table-responsive">
-    <table class="table table-dark table-hover table-sm" id="log-table">
-      <thead class="text-success">
-        <tr>
-          <th>#</th>
-          <th>Time (UTC)</th>
-          <th>Event</th>
-          <th>Detail</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in activity %}
-        <tr>
-          <td class="text-muted">{{ row.id }}</td>
-          <td class="text-muted small">{{ row.timestamp }}</td>
-          <td class="text-light">{{ row.event }}</td>
-          <td class="text-muted small">{{ row.detail or '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<!-- Tab navigation -->
+<ul class="nav nav-pills mb-4 gap-1" id="logs-tabs">
+  <li class="nav-item">
+    <button class="nav-link active" onclick="showTab('activity', this)">
+      <i class="bi bi-list-ul me-1"></i>Activity Log
+      <span class="badge bg-secondary ms-1">{{ activity|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" onclick="showTab('ssh', this)">
+      <i class="bi bi-terminal me-1"></i>SSH Attempts
+      <span class="badge bg-{% if ssh_logs|selectattr('success','equalto',0)|list|length > 0 %}warning{% else %}secondary{% endif %} ms-1">{{ ssh_logs|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" onclick="showTab('alerts', this)">
+      <i class="bi bi-bell me-1"></i>Security Alerts
+      <span class="badge bg-{% if alerts|length > 0 %}danger{% else %}secondary{% endif %} ms-1">{{ alerts|length }}</span>
+    </button>
+  </li>
+</ul>
+
+<!-- Activity Log Tab -->
+<div id="tab-activity">
+  <div class="dash-card p-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+      <h6 class="text-success mb-0">Activity Log</h6>
+      <div class="d-flex gap-2">
+        <input type="text" id="activity-search" class="form-control form-control-sm"
+               placeholder="Filter events..." style="width:200px" onkeyup="filterActivity()">
+        <select id="activity-type-filter" class="form-select form-select-sm" style="width:150px" onchange="filterActivity()">
+          <option value="">All Types</option>
+          <option value="scan">Scans</option>
+          <option value="network">Network</option>
+          <option value="system">System</option>
+          <option value="alert">Alerts</option>
+          <option value="dashboard">Dashboard</option>
+        </select>
+      </div>
+    </div>
+    <div class="log-viewer" id="activity-log">
+      {% for item in activity %}
+      <div class="log-line" data-event="{{ item.event }}">
+        <span class="log-time">{{ item.timestamp }}</span>
+        <span class="log-event">{{ item.event }}</span>
+        {% if item.detail %}<span class="log-detail">{{ item.detail }}</span>{% endif %}
+      </div>
+      {% else %}
+      <p class="text-muted py-3 text-center">No activity logged yet</p>
+      {% endfor %}
+    </div>
   </div>
-  {% else %}
-  <div class="text-center py-5 text-muted">
-    <i class="bi bi-journal-text fs-1 d-block mb-2 opacity-25"></i>
-    No activity logged yet.
+</div>
+
+<!-- SSH Tab -->
+<div id="tab-ssh" class="d-none">
+  <div class="dash-card p-3">
+    <h6 class="text-success mb-3">SSH Login Attempts</h6>
+    {% if ssh_logs %}
+    <div class="table-responsive">
+      <table class="table table-dark table-hover table-sm">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>IP Address</th>
+            <th>Username</th>
+            <th>Country</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in ssh_logs %}
+          <tr>
+            <td class="small text-muted">{{ s.timestamp }}</td>
+            <td class="font-mono">{{ s.ip or '&#x2014;' }}</td>
+            <td>{{ s.username or '&#x2014;' }}</td>
+            <td class="small">{{ s.country or '&#x2014;' }}</td>
+            <td>
+              {% if s.success %}
+                <span class="badge bg-success-subtle text-success">Success</span>
+              {% else %}
+                <span class="badge bg-danger-subtle text-danger">Failed</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted text-center py-4"><i class="bi bi-shield-check me-2"></i>No SSH attempts recorded</p>
+    {% endif %}
   </div>
-  {% endif %}
+</div>
+
+<!-- Alerts Tab -->
+<div id="tab-alerts" class="d-none">
+  <div class="dash-card p-3">
+    <h6 class="text-success mb-3">Security Alerts</h6>
+    {% if alerts %}
+    <div class="table-responsive">
+      <table class="table table-dark table-hover table-sm">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Target</th>
+            <th>Detail</th>
+            <th>Severity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in alerts %}
+          <tr>
+            <td class="small text-muted">{{ a.timestamp }}</td>
+            <td class="small">{{ a.alert_type }}</td>
+            <td class="font-mono small">{{ a.target or '&#x2014;' }}</td>
+            <td class="small text-muted">{{ a.detail[:80] if a.detail else '&#x2014;' }}</td>
+            <td>
+              <span class="badge bg-{{ 'danger' if a.severity == 'critical' else ('warning' if a.severity == 'warning' else 'info') }}-subtle
+                          text-{{ 'danger' if a.severity == 'critical' else ('warning' if a.severity == 'warning' else 'info') }}">
+                {{ a.severity }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted text-center py-4"><i class="bi bi-shield-check me-2"></i>No security alerts</p>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-function filterLogs() {
-  const q = document.getElementById('log-search').value.toLowerCase();
-  document.querySelectorAll('#log-table tbody tr').forEach(row => {
-    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+function showTab(name, btn) {
+  ['activity','ssh','alerts'].forEach(t => {
+    document.getElementById('tab-' + t).classList.add('d-none');
+  });
+  document.getElementById('tab-' + name).classList.remove('d-none');
+  document.querySelectorAll('#logs-tabs .nav-link').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function filterActivity() {
+  const search = document.getElementById('activity-search').value.toLowerCase();
+  const typeFilter = document.getElementById('activity-type-filter').value.toLowerCase();
+  document.querySelectorAll('#activity-log .log-line').forEach(line => {
+    const event = (line.dataset.event || '').toLowerCase();
+    const text = line.textContent.toLowerCase();
+    const matchSearch = !search || text.includes(search);
+    const matchType = !typeFilter || event.includes(typeFilter);
+    line.style.display = matchSearch && matchType ? '' : 'none';
   });
 }
 </script>

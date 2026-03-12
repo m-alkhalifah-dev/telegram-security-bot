@@ -1,92 +1,207 @@
 {% extends "base.html" %}
-{% block title %}Overview — SecBot{% endblock %}
+{% block title %}Overview — SecBot SOC{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h4 class="text-success mb-0"><i class="bi bi-speedometer2 me-2"></i>System Overview</h4>
-  <small class="text-muted">Auto-refreshes every 30s</small>
+<!-- Page header -->
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h5 class="text-success mb-0 fw-bold">
+      <i class="bi bi-speedometer2 me-2"></i>Security Operations Center
+    </h5>
+    <small class="text-muted">{{ hostname }} — Real-time monitoring</small>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/api/report/full" class="btn btn-sm btn-outline-success">
+      <i class="bi bi-file-pdf me-1"></i>PDF Report
+    </a>
+    <span class="badge bg-{{ threat_color }} fs-6 px-3 py-2">
+      <i class="bi bi-shield-{% if threat_level == 'LOW' %}check{% elif threat_level == 'MEDIUM' %}exclamation{% else %}x{% endif %} me-1"></i>
+      THREAT: {{ threat_level }}
+    </span>
+  </div>
 </div>
 
-<!-- Stat cards -->
+<!-- System gauges -->
 <div class="row g-3 mb-4">
-  <div class="col-sm-6 col-lg-3">
-    <div class="stat-card">
-      <div class="stat-icon text-warning"><i class="bi bi-cpu-fill"></i></div>
-      <div class="stat-label">CPU</div>
-      <div class="stat-value" id="cpu-val">—</div>
-      <div class="progress mt-2" style="height:4px">
+  <div class="col-6 col-lg-3">
+    <div class="metric-card">
+      <div class="metric-gauge">
+        <canvas id="cpuGauge" width="80" height="80"></canvas>
+        <div class="gauge-value" id="cpu-val">&#x2014;</div>
+      </div>
+      <div class="metric-label"><i class="bi bi-cpu-fill text-warning me-1"></i>CPU</div>
+      <div class="progress mt-2" style="height:3px">
         <div class="progress-bar bg-warning" id="cpu-bar" style="width:0%"></div>
       </div>
     </div>
   </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="stat-card">
-      <div class="stat-icon text-info"><i class="bi bi-memory"></i></div>
-      <div class="stat-label">RAM</div>
-      <div class="stat-value" id="ram-val">—</div>
-      <div class="progress mt-2" style="height:4px">
+  <div class="col-6 col-lg-3">
+    <div class="metric-card">
+      <div class="metric-gauge">
+        <canvas id="ramGauge" width="80" height="80"></canvas>
+        <div class="gauge-value" id="ram-val">&#x2014;</div>
+      </div>
+      <div class="metric-label"><i class="bi bi-memory text-info me-1"></i>RAM</div>
+      <div class="progress mt-2" style="height:3px">
         <div class="progress-bar bg-info" id="ram-bar" style="width:0%"></div>
       </div>
     </div>
   </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="stat-card">
-      <div class="stat-icon text-danger"><i class="bi bi-thermometer-half"></i></div>
-      <div class="stat-label">Temperature</div>
-      <div class="stat-value" id="temp-val">—</div>
-      <div class="progress mt-2" style="height:4px">
+  <div class="col-6 col-lg-3">
+    <div class="metric-card">
+      <div class="metric-gauge">
+        <canvas id="tempGauge" width="80" height="80"></canvas>
+        <div class="gauge-value" id="temp-val">&#x2014;</div>
+      </div>
+      <div class="metric-label"><i class="bi bi-thermometer-half text-danger me-1"></i>Temp</div>
+      <div class="progress mt-2" style="height:3px">
         <div class="progress-bar bg-danger" id="temp-bar" style="width:0%"></div>
       </div>
     </div>
   </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="stat-card">
-      <div class="stat-icon text-success"><i class="bi bi-hdd-fill"></i></div>
-      <div class="stat-label">Disk</div>
-      <div class="stat-value" id="disk-val">—</div>
-      <div class="progress mt-2" style="height:4px">
+  <div class="col-6 col-lg-3">
+    <div class="metric-card">
+      <div class="metric-gauge">
+        <canvas id="diskGauge" width="80" height="80"></canvas>
+        <div class="gauge-value" id="disk-val">&#x2014;</div>
+      </div>
+      <div class="metric-label"><i class="bi bi-hdd-fill text-success me-1"></i>Disk</div>
+      <div class="progress mt-2" style="height:3px">
         <div class="progress-bar bg-success" id="disk-bar" style="width:0%"></div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- CPU/RAM chart + info -->
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-lg-3">
+    <div class="summary-card summary-card-green">
+      <div class="summary-icon"><i class="bi bi-hdd-network"></i></div>
+      <div class="summary-info">
+        <div class="summary-value">{{ device_total }}</div>
+        <div class="summary-label">Total Devices</div>
+        <div class="summary-sub text-success">{{ known_count }} known</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="summary-card summary-card-{% if unknown_count > 0 %}yellow{% else %}green{% endif %}">
+      <div class="summary-icon"><i class="bi bi-question-circle"></i></div>
+      <div class="summary-info">
+        <div class="summary-value">{{ unknown_count }}</div>
+        <div class="summary-label">Unknown Devices</div>
+        <div class="summary-sub {% if unknown_count > 0 %}text-warning{% else %}text-success{% endif %}">
+          {% if unknown_count > 0 %}Action required{% else %}All clear{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="summary-card summary-card-{% if alerts_today > 0 %}red{% else %}green{% endif %}">
+      <div class="summary-icon"><i class="bi bi-bell"></i></div>
+      <div class="summary-info">
+        <div class="summary-value">{{ alerts_today }}</div>
+        <div class="summary-label">Alerts Today</div>
+        <div class="summary-sub {% if alerts_today > 0 %}text-danger{% else %}text-success{% endif %}">
+          {% if alerts_today > 0 %}Review logs{% else %}No alerts{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="summary-card summary-card-blue">
+      <div class="summary-icon"><i class="bi bi-terminal"></i></div>
+      <div class="summary-info">
+        <div class="summary-value">{{ stats.get('commands_run', '0') }}</div>
+        <div class="summary-label">Commands Run</div>
+        <div class="summary-sub text-info">{{ stats.get('scans_done', '0') }} scans</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts row -->
 <div class="row g-3 mb-4">
   <div class="col-lg-8">
     <div class="dash-card p-3">
-      <h6 class="text-success mb-3"><i class="bi bi-graph-up me-2"></i>CPU & RAM History</h6>
-      <canvas id="cpuRamChart" height="120"></canvas>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="text-success mb-0"><i class="bi bi-graph-up me-2"></i>CPU &amp; RAM — Last 24h</h6>
+        <div class="d-flex gap-2">
+          <span class="badge-legend bg-warning">CPU</span>
+          <span class="badge-legend bg-info">RAM</span>
+        </div>
+      </div>
+      <canvas id="cpuRamChart" height="110"></canvas>
     </div>
   </div>
   <div class="col-lg-4">
     <div class="dash-card p-3 h-100">
       <h6 class="text-success mb-3"><i class="bi bi-info-circle me-2"></i>System Info</h6>
-      <table class="table table-sm table-borderless text-muted mb-0">
-        <tr><td>Uptime</td><td id="uptime-val" class="text-light fw-bold">—</td></tr>
-        <tr><td>RAM Total</td><td id="ram-total-val" class="text-light fw-bold">—</td></tr>
-        <tr><td>Disk Total</td><td id="disk-total-val" class="text-light fw-bold">—</td></tr>
+      <table class="table table-sm table-borderless info-table mb-0">
+        <tr><td>Hostname</td><td id="info-hostname" class="text-light">{{ hostname }}</td></tr>
+        <tr><td>Uptime</td><td id="uptime-val" class="text-light">&#x2014;</td></tr>
+        <tr><td>RAM Total</td><td id="ram-total-val" class="text-light">&#x2014;</td></tr>
+        <tr><td>Disk Total</td><td id="disk-total-val" class="text-light">&#x2014;</td></tr>
         <tr><td>Bot Version</td><td class="text-success fw-bold">v{{ version }}</td></tr>
-        <tr><td>Commands Run</td><td id="cmd-count" class="text-light fw-bold">{{ stats.get('commands_run', '0') }}</td></tr>
-        <tr><td>Scans Done</td><td id="scan-count" class="text-light fw-bold">{{ stats.get('scans_done', '0') }}</td></tr>
+        <tr><td>Scans Done</td><td id="scan-count" class="text-light">{{ stats.get('scans_done', '0') }}</td></tr>
       </table>
     </div>
   </div>
 </div>
 
-<!-- Bandwidth + processes -->
-<div class="row g-3">
-  <div class="col-lg-6">
+<!-- Bandwidth + activity + quick actions -->
+<div class="row g-3 mb-4">
+  <div class="col-lg-4">
     <div class="dash-card p-3">
       <h6 class="text-success mb-3"><i class="bi bi-activity me-2"></i>Bandwidth (kbps)</h6>
       <canvas id="bandwidthChart" height="120"></canvas>
     </div>
   </div>
-  <div class="col-lg-6">
+  <div class="col-lg-4">
     <div class="dash-card p-3">
-      <h6 class="text-success mb-3"><i class="bi bi-list-task me-2"></i>Top Processes</h6>
+      <h6 class="text-success mb-3"><i class="bi bi-clock-history me-2"></i>Recent Activity</h6>
+      <div id="activity-feed" style="max-height:200px;overflow-y:auto">
+        {% for item in recent_activity %}
+        <div class="activity-item">
+          <span class="activity-event">{{ item.event }}</span>
+          <span class="activity-time text-muted">{{ item.timestamp[-8:] if item.timestamp else '' }}</span>
+        </div>
+        {% else %}
+        <p class="text-muted small">No recent activity</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="dash-card p-3">
+      <h6 class="text-success mb-3"><i class="bi bi-lightning me-2"></i>Quick Actions</h6>
+      <div class="d-grid gap-2">
+        <button class="btn btn-outline-success btn-sm" onclick="runNetworkScan()">
+          <i class="bi bi-wifi me-2"></i>Run Network Scan
+          <span class="spinner-border spinner-border-sm ms-2 d-none" id="scan-spinner"></span>
+        </button>
+        <a href="{{ url_for('scans') }}" class="btn btn-outline-info btn-sm">
+          <i class="bi bi-search me-2"></i>Run Security Scan
+        </a>
+        <button class="btn btn-outline-warning btn-sm" onclick="refreshStats()">
+          <i class="bi bi-arrow-clockwise me-2"></i>Refresh Stats
+        </button>
+        <a href="/api/report/system" class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-file-pdf me-2"></i>Download System Report
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Top processes -->
+<div class="row g-3">
+  <div class="col-12">
+    <div class="dash-card p-3">
+      <h6 class="text-success mb-3"><i class="bi bi-list-task me-2"></i>Top Processes by CPU</h6>
       <div id="processes-table">
-        <div class="text-muted small">Loading...</div>
+        <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-success"></div></div>
       </div>
     </div>
   </div>
@@ -95,6 +210,9 @@
 
 {% block scripts %}
 <script>
-  initOverview();
+  document.addEventListener('DOMContentLoaded', () => {
+    initOverview();
+    initGauges();
+  });
 </script>
 {% endblock %}

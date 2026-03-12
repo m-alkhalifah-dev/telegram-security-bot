@@ -1,92 +1,192 @@
 {% extends "base.html" %}
-{% block title %}Network — SecBot{% endblock %}
+{% block title %}Network — SecBot SOC{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h4 class="text-success mb-0"><i class="bi bi-diagram-3 me-2"></i>Network Devices</h4>
-  <span class="badge bg-success" id="device-count">{{ devices|length }} devices</span>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h5 class="text-success mb-0 fw-bold"><i class="bi bi-diagram-3 me-2"></i>Network Monitor</h5>
+    <small class="text-muted">{{ devices|length }} device(s) in database</small>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button class="btn btn-success btn-sm" onclick="runNetworkScan()" id="scan-btn">
+      <i class="bi bi-wifi me-1"></i>Run Scan
+      <span class="spinner-border spinner-border-sm ms-1 d-none" id="scan-spinner"></span>
+    </button>
+    <a href="/api/report/network" class="btn btn-outline-success btn-sm">
+      <i class="bi bi-file-pdf me-1"></i>PDF Report
+    </a>
+  </div>
 </div>
 
-<div class="dash-card p-3 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
+<!-- Live bandwidth -->
+<div class="row g-3 mb-4">
+  <div class="col-lg-8">
+    <div class="dash-card p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="text-success mb-0"><i class="bi bi-activity me-2"></i>Live Bandwidth</h6>
+        <small class="text-muted">Updates every 5s</small>
+      </div>
+      <canvas id="bwChart" height="80"></canvas>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="dash-card p-3 h-100">
+      <h6 class="text-success mb-3"><i class="bi bi-bar-chart me-2"></i>Network Summary</h6>
+      <div class="d-flex justify-content-between mb-2">
+        <span class="text-muted small">Total Devices</span>
+        <span class="text-light fw-bold" id="net-total">{{ devices|length }}</span>
+      </div>
+      <div class="d-flex justify-content-between mb-2">
+        <span class="text-muted small">Known</span>
+        <span class="text-success fw-bold" id="net-known">{{ devices|selectattr('status','eq','known')|list|length }}</span>
+      </div>
+      <div class="d-flex justify-content-between mb-2">
+        <span class="text-muted small">Unknown</span>
+        <span class="text-warning fw-bold" id="net-unknown">{{ devices|selectattr('status','eq','unknown')|list|length }}</span>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span class="text-muted small">Download (kbps)</span>
+        <span class="text-info small" id="rx-val">&#x2014;</span>
+      </div>
+      <div class="d-flex justify-content-between">
+        <span class="text-muted small">Upload (kbps)</span>
+        <span class="text-warning small" id="tx-val">&#x2014;</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Device table -->
+<div class="dash-card p-3">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h6 class="text-success mb-0"><i class="bi bi-hdd-network me-2"></i>Discovered Devices</h6>
-    <div class="d-flex gap-2 align-items-center">
-      <span class="text-muted small" id="last-updated"></span>
-      <button class="btn btn-sm btn-outline-warning" id="scan-btn" onclick="runScan()">
-        <i class="bi bi-radar me-1"></i>Run Scan
-      </button>
-      <button class="btn btn-sm btn-outline-success" onclick="fetchDevices()">
-        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-      </button>
+    <div class="d-flex gap-2 flex-wrap">
+      <input type="text" id="device-search" class="form-control form-control-sm"
+             placeholder="Search IP, MAC, vendor..." style="width:220px"
+             onkeyup="filterDevices()">
+      <select id="status-filter" class="form-select form-select-sm" style="width:120px" onchange="filterDevices()">
+        <option value="">All Status</option>
+        <option value="known">Known</option>
+        <option value="unknown">Unknown</option>
+      </select>
     </div>
   </div>
 
-  <div id="scan-status" class="alert alert-warning d-none py-2 mb-2">
-    <i class="bi bi-hourglass-split me-1"></i>Scanning network, please wait…
-  </div>
-
   <div class="table-responsive">
-    <table class="table table-dark table-hover table-sm" id="devices-table">
-      <thead class="text-success">
+    <table class="table table-dark table-hover table-sm align-middle" id="devices-table">
+      <thead>
         <tr>
-          <th>Status</th>
-          <th>MAC Address</th>
-          <th>IP</th>
-          <th>Vendor / Hostname</th>
-          <th>First Seen</th>
-          <th>Last Seen</th>
+          <th onclick="sortTable(0)" class="sortable">IP <i class="bi bi-arrow-down-up"></i></th>
+          <th onclick="sortTable(1)" class="sortable">MAC <i class="bi bi-arrow-down-up"></i></th>
+          <th onclick="sortTable(2)" class="sortable">Vendor <i class="bi bi-arrow-down-up"></i></th>
+          <th>Name</th>
+          <th onclick="sortTable(4)" class="sortable">Status <i class="bi bi-arrow-down-up"></i></th>
+          <th onclick="sortTable(5)" class="sortable">First Seen <i class="bi bi-arrow-down-up"></i></th>
+          <th onclick="sortTable(6)" class="sortable">Last Seen <i class="bi bi-arrow-down-up"></i></th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="devices-tbody">
-        {% if devices %}
-          {% for d in devices %}
-          <tr>
-            <td>
-              {% if d.status == 'known' %}
-                <span class="badge bg-success">Known</span>
-              {% else %}
-                <span class="badge bg-warning text-dark">Unknown</span>
-              {% endif %}
-            </td>
-            <td><code class="text-success">{{ d.mac or '—' }}</code></td>
-            <td><code>{{ d.ip or '—' }}</code></td>
-            <td class="text-light">{{ d.hostname or d.vendor or '—' }}</td>
-            <td class="text-muted small">{{ d.first_seen or '—' }}</td>
-            <td class="text-muted small">{{ d.last_seen or '—' }}</td>
-          </tr>
-          {% endfor %}
+        {% for d in devices %}
+        <tr class="device-row {% if d.status == 'known' %}row-known{% elif d.status == 'unknown' %}row-unknown{% endif %}"
+            data-status="{{ d.status }}"
+            data-ip="{{ d.ip }}" data-mac="{{ d.mac }}" data-vendor="{{ d.vendor or '' }}">
+          <td class="font-mono">{{ d.ip or '&#x2014;' }}</td>
+          <td class="font-mono text-muted small">{{ d.mac or '&#x2014;' }}</td>
+          <td class="small">{{ d.vendor or '&#x2014;' }}</td>
+          <td class="small text-info">{{ d.hostname or '&#x2014;' }}</td>
+          <td>
+            {% if d.status == 'known' %}
+              <span class="badge bg-success-subtle text-success">Known</span>
+            {% else %}
+              <span class="badge bg-warning-subtle text-warning">Unknown</span>
+            {% endif %}
+          </td>
+          <td class="small text-muted">{{ d.first_seen or '&#x2014;' }}</td>
+          <td class="small text-muted">{{ d.last_seen or '&#x2014;' }}</td>
+          <td>
+            <button class="btn btn-xs btn-outline-info"
+                    onclick="showDeviceDetails('{{ d.mac }}','{{ d.ip }}','{{ d.vendor or '' }}','{{ d.hostname or '' }}','{{ d.status }}','{{ d.first_seen or '' }}','{{ d.last_seen or '' }}')"
+                    title="Details">
+              <i class="bi bi-eye"></i>
+            </button>
+          </td>
+        </tr>
         {% else %}
-          <tr id="empty-row">
-            <td colspan="6" class="text-center py-5 text-muted">
-              <i class="bi bi-diagram-3 fs-1 d-block mb-2 opacity-25"></i>
-              No devices in database yet.<br>
-              <small>Click <strong>Run Scan</strong> or use <code>/scan</code> in the bot.</small>
-            </td>
-          </tr>
-        {% endif %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No devices found — run a scan first</td></tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
-<div class="dash-card p-3">
-  <h6 class="text-success mb-3"><i class="bi bi-activity me-2"></i>Live Bandwidth</h6>
-  <div class="row mb-2">
-    <div class="col-6 text-center">
-      <div class="text-muted small">Download</div>
-      <div class="text-info fw-bold fs-5" id="net-rx">— kbps</div>
-    </div>
-    <div class="col-6 text-center">
-      <div class="text-muted small">Upload</div>
-      <div class="text-warning fw-bold fs-5" id="net-tx">— kbps</div>
+<!-- Device details modal -->
+<div class="modal fade" id="deviceModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark border border-success border-opacity-25">
+      <div class="modal-header border-success border-opacity-25">
+        <h5 class="modal-title text-success"><i class="bi bi-hdd-network me-2"></i>Device Details</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="device-modal-body">
+      </div>
+      <div class="modal-footer border-success border-opacity-25">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
     </div>
   </div>
-  <canvas id="bandwidthChart2" height="80"></canvas>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  initNetworkPage();
+document.addEventListener('DOMContentLoaded', () => {
+  initBandwidthChart();
+  startBandwidthPolling();
+});
+
+function filterDevices() {
+  const search = document.getElementById('device-search').value.toLowerCase();
+  const statusFilter = document.getElementById('status-filter').value.toLowerCase();
+  document.querySelectorAll('#devices-tbody .device-row').forEach(row => {
+    const ip = row.dataset.ip.toLowerCase();
+    const mac = row.dataset.mac.toLowerCase();
+    const vendor = row.dataset.vendor.toLowerCase();
+    const status = row.dataset.status.toLowerCase();
+    const matchSearch = !search || ip.includes(search) || mac.includes(search) || vendor.includes(search);
+    const matchStatus = !statusFilter || status === statusFilter;
+    row.style.display = matchSearch && matchStatus ? '' : 'none';
+  });
+}
+
+function sortTable(col) {
+  const tbody = document.getElementById('devices-tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr.device-row'));
+  const asc = tbody.dataset.sortCol == col && tbody.dataset.sortDir == 'asc' ? false : true;
+  tbody.dataset.sortCol = col;
+  tbody.dataset.sortDir = asc ? 'asc' : 'desc';
+  rows.sort((a, b) => {
+    const av = a.cells[col]?.textContent.trim() || '';
+    const bv = b.cells[col]?.textContent.trim() || '';
+    return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+
+function showDeviceDetails(mac, ip, vendor, hostname, status, firstSeen, lastSeen) {
+  const body = document.getElementById('device-modal-body');
+  body.innerHTML = `
+    <table class="table table-sm table-borderless text-light">
+      <tr><td class="text-muted">IP Address</td><td class="font-mono">${ip || '&#x2014;'}</td></tr>
+      <tr><td class="text-muted">MAC Address</td><td class="font-mono">${mac || '&#x2014;'}</td></tr>
+      <tr><td class="text-muted">Vendor</td><td>${vendor || '&#x2014;'}</td></tr>
+      <tr><td class="text-muted">Hostname</td><td>${hostname || '&#x2014;'}</td></tr>
+      <tr><td class="text-muted">Status</td><td><span class="badge ${status === 'known' ? 'bg-success' : 'bg-warning'}">${status}</span></td></tr>
+      <tr><td class="text-muted">First Seen</td><td>${firstSeen || '&#x2014;'}</td></tr>
+      <tr><td class="text-muted">Last Seen</td><td>${lastSeen || '&#x2014;'}</td></tr>
+    </table>
+  `;
+  new bootstrap.Modal(document.getElementById('deviceModal')).show();
+}
 </script>
 {% endblock %}

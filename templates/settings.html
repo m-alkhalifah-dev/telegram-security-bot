@@ -1,97 +1,216 @@
 {% extends "base.html" %}
-{% block title %}Settings — SecBot{% endblock %}
+{% block title %}Settings — SecBot SOC{% endblock %}
 
 {% block content %}
-<div class="mb-4">
-  <h4 class="text-success mb-0"><i class="bi bi-gear me-2"></i>Settings</h4>
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h5 class="text-success mb-0 fw-bold"><i class="bi bi-gear me-2"></i>Settings</h5>
+    <small class="text-muted">Bot configuration and system controls</small>
+  </div>
 </div>
 
-<div class="row g-3">
-  <!-- Notes -->
+<div class="row g-4">
+  <!-- Left column -->
   <div class="col-lg-6">
-    <div class="dash-card p-3">
-      <h6 class="text-success mb-3"><i class="bi bi-sticky me-2"></i>Notes</h6>
+    <!-- Bot info -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-info-circle me-2"></i>Bot Information</h6>
+      <table class="table table-sm table-borderless info-table">
+        <tr><td class="text-muted">Version</td><td class="text-success fw-bold">v{{ version }}</td></tr>
+        <tr><td class="text-muted">DB File</td><td class="font-mono small">data/history.db</td></tr>
+        <tr><td class="text-muted">Config File</td><td class="font-mono small">config.py</td></tr>
+        <tr><td class="text-muted">Port</td><td class="font-mono">5000</td></tr>
+      </table>
+    </div>
 
-      <form method="POST" action="{{ url_for('notes_add') }}" class="mb-3">
-        <div class="input-group input-group-sm">
-          <input type="text" name="content" class="form-control bg-dark border-secondary text-light"
-                 placeholder="Add a note..." maxlength="500" required>
-          <button type="submit" class="btn btn-success">
-            <i class="bi bi-plus-lg"></i>
-          </button>
+    <!-- Alert thresholds -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-bell me-2"></i>Alert Thresholds</h6>
+      <form method="POST" action="{{ url_for('settings_update') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label text-muted small">CPU Alert Threshold (%)</label>
+          <input type="range" name="alert_cpu" class="form-range" min="50" max="100"
+                 value="{{ current_settings.get('alert_cpu', '85') }}" id="cpu-slider"
+                 oninput="document.getElementById('cpu-val').textContent=this.value+'%'">
+          <div class="d-flex justify-content-between small text-muted">
+            <span>50%</span><span id="cpu-val">{{ current_settings.get('alert_cpu', '85') }}%</span><span>100%</span>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label text-muted small">RAM Alert Threshold (%)</label>
+          <input type="range" name="alert_ram" class="form-range" min="50" max="100"
+                 value="{{ current_settings.get('alert_ram', '85') }}" id="ram-slider"
+                 oninput="document.getElementById('ram-val').textContent=this.value+'%'">
+          <div class="d-flex justify-content-between small text-muted">
+            <span>50%</span><span id="ram-val">{{ current_settings.get('alert_ram', '85') }}%</span><span>100%</span>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label text-muted small">Temperature Alert Threshold (&#xb0;C)</label>
+          <input type="range" name="alert_temp" class="form-range" min="50" max="90"
+                 value="{{ current_settings.get('alert_temp', '75') }}" id="temp-slider"
+                 oninput="document.getElementById('temp-val').textContent=this.value+'&#xb0;C'">
+          <div class="d-flex justify-content-between small text-muted">
+            <span>50&#xb0;C</span><span id="temp-val">{{ current_settings.get('alert_temp', '75') }}&#xb0;C</span><span>90&#xb0;C</span>
+          </div>
+        </div>
+        <button class="btn btn-success btn-sm"><i class="bi bi-save me-1"></i>Save Thresholds</button>
+      </form>
+    </div>
+
+    <!-- Known devices -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-hdd-network me-2"></i>Known Devices</h6>
+      {% if known_devices %}
+      <div class="table-responsive mb-3">
+        <table class="table table-sm table-dark table-hover">
+          <thead><tr><th>MAC</th><th>Name</th><th>Action</th></tr></thead>
+          <tbody>
+            {% for mac, info in known_devices.items() %}
+            <tr>
+              <td class="font-mono small">{{ mac }}</td>
+              <td>{{ info.name if info is mapping else info }}</td>
+              <td>
+                <form method="POST" action="{{ url_for('device_remove') }}" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="mac" value="{{ mac }}">
+                  <button class="btn btn-xs btn-outline-danger" onclick="return confirm('Remove this device?')">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small">No known devices. Approve devices via Telegram /approve command.</p>
+      {% endif %}
+      <form method="POST" action="{{ url_for('device_add') }}" class="row g-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-5">
+          <input type="text" name="mac" class="form-control form-control-sm font-mono"
+                 placeholder="AA:BB:CC:DD:EE:FF" pattern="([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}" required>
+        </div>
+        <div class="col-5">
+          <input type="text" name="name" class="form-control form-control-sm" placeholder="Device name" required>
+        </div>
+        <div class="col-2">
+          <button class="btn btn-success btn-sm w-100"><i class="bi bi-plus"></i></button>
         </div>
       </form>
-
-      {% set notes = [] %}
-      {% set notes = namespace(items=[]) %}
-      <div id="notes-list">
-        <div class="text-muted small text-center py-2">Loading notes...</div>
-      </div>
     </div>
-  </div>
 
-  <!-- Quick Info -->
-  <div class="col-lg-6">
-    <div class="dash-card p-3">
-      <h6 class="text-success mb-3"><i class="bi bi-info-circle me-2"></i>Bot Info</h6>
-      <table class="table table-sm table-borderless text-muted mb-0">
-        <tr><td>Version</td><td class="text-success fw-bold">v{{ version }}</td></tr>
-        <tr><td>Dashboard</td><td class="text-light">Flask 3.0</td></tr>
-        <tr><td>Platform</td><td class="text-light">Raspberry Pi 5</td></tr>
-        <tr><td>Python</td><td class="text-light" id="py-ver">—</td></tr>
-      </table>
-
-      <hr class="border-secondary">
-
-      <h6 class="text-success mb-2"><i class="bi bi-terminal me-2"></i>Quick Config Reference</h6>
-      <small class="text-muted">Edit <code>config.py</code> on the Pi to change:</small>
-      <ul class="mt-2 text-muted small">
-        <li><code>BOT_TOKEN</code> — Telegram bot token</li>
-        <li><code>ALLOWED_CHAT_IDS</code> — authorised Telegram IDs</li>
-        <li><code>NETWORK_RANGE</code> — local subnet to scan</li>
-        <li><code>ABUSEIPDB_API_KEY</code> — optional abuse lookup</li>
-        <li><code>DASHBOARD_PASS</code> — this dashboard password</li>
-      </ul>
-    </div>
-  </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-// Load notes via API
-fetch('/api/notes')
-  .then(r => r.json())
-  .then(data => {
-    const el = document.getElementById('notes-list');
-    if (!data.notes || data.notes.length === 0) {
-      el.innerHTML = '<div class="text-muted small text-center py-2">No notes yet.</div>';
-      return;
-    }
-    el.innerHTML = data.notes.map(n => `
-      <div class="d-flex justify-content-between align-items-start border-bottom border-secondary pb-2 mb-2">
-        <div>
-          <div class="text-light small">${escHtml(n.content)}</div>
-          <div class="text-muted" style="font-size:0.7rem">${n.timestamp}</div>
+    <!-- Change password -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-key me-2"></i>Change Password</h6>
+      <form method="POST" action="{{ url_for('change_password') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="input-group input-group-sm">
+          <input type="password" name="new_password" class="form-control" placeholder="New password (min 8 chars)" required>
+          <button class="btn btn-success"><i class="bi bi-check"></i> Update</button>
         </div>
-        <form method="POST" action="/notes/delete/${n.id}" class="ms-2">
-          <button class="btn btn-sm btn-outline-danger py-0 px-1">
-            <i class="bi bi-trash"></i>
+      </form>
+    </div>
+  </div>
+
+  <!-- Right column -->
+  <div class="col-lg-6">
+    <!-- System controls -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-cpu me-2"></i>System Controls</h6>
+      <div class="d-grid gap-2">
+        <form method="POST" action="{{ url_for('restart_bot') }}" onsubmit="return confirm('Restart the Telegram bot?')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-outline-warning btn-sm w-100">
+            <i class="bi bi-arrow-repeat me-2"></i>Restart Bot
+          </button>
+        </form>
+        <form method="POST" action="{{ url_for('restart_dashboard') }}" onsubmit="return confirm('Restart the dashboard?')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-outline-warning btn-sm w-100">
+            <i class="bi bi-arrow-repeat me-2"></i>Restart Dashboard
           </button>
         </form>
       </div>
-    `).join('');
-  });
+    </div>
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+    <!-- PDF Reports -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-file-pdf me-2"></i>Download Reports</h6>
+      <div class="d-grid gap-2">
+        <a href="/api/report/system" class="btn btn-outline-success btn-sm">
+          <i class="bi bi-download me-2"></i>System Health Report
+        </a>
+        <a href="/api/report/network" class="btn btn-outline-info btn-sm">
+          <i class="bi bi-download me-2"></i>Network Security Report
+        </a>
+        <a href="/api/report/full" class="btn btn-outline-warning btn-sm">
+          <i class="bi bi-download me-2"></i>Full Security Assessment
+        </a>
+      </div>
+    </div>
 
-// Python version
-fetch('/api/stats')
-  .then(r => r.json())
-  .then(d => {
-    // just show uptime info we already have
-  });
-</script>
+    <!-- Notes -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-sticky me-2"></i>Notes</h6>
+      {% for note in notes %}
+      <div class="note-item d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <p class="mb-1 small">{{ note.content }}</p>
+          <small class="text-muted">{{ note.timestamp }}</small>
+        </div>
+        <form method="POST" action="{{ url_for('notes_delete', note_id=note.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-xs btn-outline-danger ms-2"><i class="bi bi-trash"></i></button>
+        </form>
+      </div>
+      {% else %}
+      <p class="text-muted small">No notes yet.</p>
+      {% endfor %}
+      <form method="POST" action="{{ url_for('notes_add') }}" class="mt-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="input-group input-group-sm">
+          <textarea name="content" class="form-control" rows="2" placeholder="Add a note..." required></textarea>
+          <button class="btn btn-success"><i class="bi bi-plus"></i></button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Webhook -->
+    <div class="dash-card p-3 mb-3">
+      <h6 class="text-success mb-3"><i class="bi bi-webhook me-2"></i>Webhook Notifications</h6>
+      {% if webhook and webhook.enabled %}
+      <div class="alert alert-success border-0 small py-2 mb-2">
+        <i class="bi bi-check-circle me-1"></i>Webhook active: {{ webhook.url[:50] }}...
+      </div>
+      {% else %}
+      <p class="text-muted small">Configure via Telegram: <code>/webhook set &lt;URL&gt;</code></p>
+      {% endif %}
+    </div>
+
+    <!-- Schedules -->
+    <div class="dash-card p-3">
+      <h6 class="text-success mb-3"><i class="bi bi-calendar-check me-2"></i>Scheduled Scans</h6>
+      {% if schedules %}
+      {% for s in schedules %}
+      <div class="d-flex justify-content-between align-items-center mb-2 p-2 rounded" style="background:#0a0e17">
+        <div>
+          <span class="text-light small fw-bold">{{ s.schedule_type|title }}</span>
+          {% if s.day_of_week %}<span class="text-muted small"> ({{ s.day_of_week }})</span>{% endif %}
+          <span class="text-success ms-2 small">@ {{ s.schedule_time }}</span>
+        </div>
+        <span class="badge {% if s.enabled %}bg-success{% else %}bg-secondary{% endif %}">
+          {% if s.enabled %}Active{% else %}Disabled{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="text-muted small">No scheduled scans. Use <code>/schedule daily HH:MM</code> in Telegram.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endblock %}

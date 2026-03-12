@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Telegram Security Bot v2.0
+Telegram Security Bot v3.0
 Personal cybersecurity assistant running on Raspberry Pi
 """
 
 import io
+import csv
+import io as io_module
 import logging
 import asyncio
 import os
@@ -29,7 +31,16 @@ from config import (
 from modules.db import (
     init_db, add_note, get_notes, delete_note,
     log_activity, increment_stat, log_scan, log_device, log_alert,
+    add_schedule, get_schedules, update_schedule, delete_schedule,
+    add_monitored_site, get_monitored_sites, update_site_status, remove_monitored_site,
+    set_webhook, get_webhook, disable_webhook, get_ssh_logs, cleanup_old_data,
 )
+from modules.pdf_report import (
+    generate_system_report, generate_network_report,
+    generate_website_report, generate_full_report,
+)
+from modules.scheduler import start_scheduler
+from modules.notifications import notify, get_webhook_status
 from modules.system import get_system_status, get_top_processes
 from modules.network import ping_host, port_scan, check_website, check_ssl, get_public_ip
 from modules.monitor import NetworkMonitor
@@ -175,8 +186,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ /notes `[add|list|del]` — manage notes\n"
         "├ /timer `[seconds]` — countdown timer\n"
         "├ /botinfo — bot version & stats\n"
-        "├ /changelog — what's new in v2.0\n"
+        "├ /changelog — what's new in v3.0\n"
         "└ /dailyreport `[on|off]` — scheduled daily summary\n\n"
+        "📄 *Reports & Automation (v3.0):*\n"
+        "├ /pdfreport `[system|network|website|full]` — PDF report\n"
+        "├ /schedule `[daily|weekly|off|status]` — schedule scans\n"
+        "├ /webhook `[set|test|off]` — webhook notifications\n"
+        "├ /export `[devices|scans|logs]` — export data as CSV\n"
+        "└ /uptime `[add|list|stop]` — website uptime monitor\n\n"
+        "🔎 *Web Recon (v3.0):*\n"
+        "├ /compare `[URL1]` `[URL2]` — compare two sites\n"
+        "├ /headers `[URL]` — full HTTP headers analysis\n"
+        "├ /sitemap `[URL]` — fetch sitemap.xml\n"
+        "├ /meta `[URL]` — extract meta tags\n"
+        "├ /links `[URL]` — extract all links\n"
+        "├ /whoisip `[IP]` — WHOIS for IP addresses\n"
+        "├ /reversedns `[IP]` — reverse DNS lookup\n"
+        "└ /portknock `[IP]` `[ports]` — test port knocking\n\n"
         "💡 Use /help for usage examples"
     )
     await update.message.reply_text(msg1, parse_mode='Markdown')
@@ -225,6 +251,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ `/dailyreport on` — enable daily report at 08:00\n"
         "├ `/dailyreport on 07:30` — enable at custom time\n"
         "└ `/dailyreport off` — disable\n\n"
+        "*v3.0 — Reports & Recon:*\n"
+        "├ `/pdfreport system` — system health PDF\n"
+        "├ `/pdfreport website https://example.com` — website audit PDF\n"
+        "├ `/pdfreport full` — complete security PDF\n"
+        "├ `/schedule daily 08:00` — daily auto-scan\n"
+        "├ `/schedule weekly monday 09:00` — weekly scan\n"
+        "├ `/webhook set https://discord.com/api/webhooks/...`\n"
+        "├ `/export devices` — devices CSV\n"
+        "├ `/uptime add https://example.com 5` — monitor every 5min\n"
+        "├ `/compare https://site1.com https://site2.com`\n"
+        "├ `/headers https://example.com`\n"
+        "├ `/sitemap https://example.com`\n"
+        "├ `/meta https://example.com`\n"
+        "├ `/links https://example.com`\n"
+        "├ `/whoisip 8.8.8.8`\n"
+        "├ `/reversedns 8.8.8.8`\n"
+        "└ `/portknock 192.168.1.1 1234 5678 9012`\n\n"
         "⚠️ Only scan systems you are authorized to test."
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
@@ -1361,31 +1404,802 @@ async def changelog_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show what's new in this version."""
     msg = (
         f"📋 *Changelog — v{BOT_VERSION}*\n\n"
-        "🆕 *New in v2.0:*\n\n"
-        "🌐 *Web Dashboard*\n"
-        "├ Flask dashboard at port 5000\n"
-        "├ Real-time CPU/RAM/Temp/Disk gauges\n"
-        "├ Network devices table\n"
-        "├ Scan history browser\n"
-        "├ Activity log viewer\n"
-        "└ Notes manager\n\n"
-        "🧰 *New Commands:*\n"
-        "├ /dashboard — open dashboard in browser\n"
-        "├ /screenshot — capture Pi desktop\n"
-        "├ /qr — generate QR codes\n"
-        "├ /shorten — URL shortener\n"
-        "├ /weather — weather by city\n"
-        "├ /notes — persistent note-taking\n"
-        "├ /timer — countdown timer\n"
-        "├ /botinfo — version & runtime stats\n"
-        "└ /changelog — this list\n\n"
-        "🔧 *Improvements:*\n"
-        "├ SQLite history database\n"
-        "├ Scan history logged automatically\n"
-        "└ Bot/dashboard run independently\n\n"
-        "📦 *Total commands: 60+*"
+        "🆕 *New in v3.0:*\n\n"
+        "📄 *PDF Reports*\n"
+        "├ /pdfreport system — system health PDF\n"
+        "├ /pdfreport network — network security PDF\n"
+        "├ /pdfreport website — website audit PDF\n"
+        "└ /pdfreport full — complete assessment PDF\n\n"
+        "⚙️ *Automation*\n"
+        "├ /schedule — schedule automated scans\n"
+        "├ /webhook — Discord/Slack/HTTP webhooks\n"
+        "├ /export — export CSV (devices/scans/logs)\n"
+        "└ /uptime — website uptime monitoring\n\n"
+        "🔎 *Web Recon*\n"
+        "├ /compare — compare two websites\n"
+        "├ /headers — full HTTP headers analysis\n"
+        "├ /sitemap — sitemap.xml structure\n"
+        "├ /meta — extract meta tags\n"
+        "├ /links — extract all links\n"
+        "├ /whoisip — WHOIS for IP addresses\n"
+        "├ /reversedns — reverse DNS lookup\n"
+        "└ /portknock — test port knocking sequence\n\n"
+        "📦 *Total commands: 75+*\n\n"
+        "📦 *v2.0 Summary:*\n"
+        "├ Web dashboard (Flask, port 5000)\n"
+        "├ SQLite scan history database\n"
+        "└ 60+ security commands"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
+
+
+# ============================================================
+# v3.0 new commands
+# ============================================================
+
+@authorized_only
+async def pdfreport_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate and send a PDF security report."""
+    args = context.args
+    report_type = args[0].lower() if args else "system"
+
+    msg = await update.message.reply_text("Generating PDF report... Please wait.")
+
+    try:
+        if report_type == "system":
+            buf = await generate_system_report()
+            filename = f"system_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            caption = "System Health Report"
+        elif report_type == "network":
+            buf = await generate_network_report()
+            filename = f"network_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            caption = "Network Security Report"
+        elif report_type == "website":
+            if len(args) < 2:
+                await msg.edit_text("Usage: /pdfreport website <URL>")
+                return
+            url = args[1]
+            buf = await generate_website_report(url)
+            filename = f"website_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            caption = f"Website Security Audit: {url}"
+        elif report_type == "full":
+            buf = await generate_full_report()
+            filename = f"full_report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            caption = "Complete Security Assessment"
+        else:
+            await msg.edit_text(
+                "*PDF Report Generator*\n\n"
+                "Usage:\n"
+                "`/pdfreport system` — System health report\n"
+                "`/pdfreport network` — Network security report\n"
+                "`/pdfreport website <URL>` — Website security audit\n"
+                "`/pdfreport full` — Complete assessment",
+                parse_mode='Markdown'
+            )
+            return
+
+        await msg.delete()
+        await update.message.reply_document(
+            document=InputFile(buf, filename=filename),
+            caption=f"*{caption}*\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            parse_mode='Markdown'
+        )
+        log_activity("pdfreport", report_type)
+        increment_stat("scans_done")
+    except ImportError:
+        await msg.edit_text("PDF generation requires reportlab: `pip install reportlab`", parse_mode='Markdown')
+    except Exception as e:
+        await msg.edit_text(f"PDF generation failed: {e}")
+
+
+@authorized_only
+async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manage scheduled security scans."""
+    args = context.args
+
+    if not args:
+        # Show current schedules
+        schedules = get_schedules()
+        if not schedules:
+            text = "*Scheduled Scans*\n\nNo schedules configured.\n\nUsage:\n`/schedule daily HH:MM`\n`/schedule weekly monday HH:MM`\n`/schedule off`\n`/schedule status`"
+        else:
+            lines = ["*Scheduled Scans*\n"]
+            for s in schedules:
+                status = "ACTIVE" if s.get('enabled') else "DISABLED"
+                stype = s.get('schedule_type', '?')
+                stime = s.get('schedule_time', '?')
+                sday = s.get('day_of_week', '')
+                last = s.get('last_run', 'Never')
+                day_str = f" ({sday})" if sday else ""
+                lines.append(f"*{stype.title()}{day_str}* at {stime} — {status}")
+                lines.append(f"Last run: {last}\n")
+            text = "\n".join(lines)
+        await update.message.reply_text(text, parse_mode='Markdown')
+        return
+
+    action = args[0].lower()
+
+    if action == "daily":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: `/schedule daily HH:MM`", parse_mode='Markdown')
+            return
+        time_str = args[1]
+        try:
+            datetime.strptime(time_str, "%H:%M")
+        except ValueError:
+            await update.message.reply_text("Invalid time format. Use HH:MM (e.g., 08:00)", parse_mode='Markdown')
+            return
+        sched_id = add_schedule("daily", time_str)
+        await update.message.reply_text(f"*Daily scan scheduled at {time_str} UTC*\nID: {sched_id}\nUse `/schedule off` to disable.", parse_mode='Markdown')
+        log_activity("schedule_set", f"daily at {time_str}")
+
+    elif action == "weekly":
+        if len(args) < 3:
+            await update.message.reply_text("Usage: `/schedule weekly <day> HH:MM`\nDays: monday, tuesday, ... sunday", parse_mode='Markdown')
+            return
+        day = args[1].lower()
+        time_str = args[2]
+        valid_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        if day not in valid_days:
+            await update.message.reply_text(f"Invalid day. Use: {', '.join(valid_days)}", parse_mode='Markdown')
+            return
+        try:
+            datetime.strptime(time_str, "%H:%M")
+        except ValueError:
+            await update.message.reply_text("Invalid time format. Use HH:MM", parse_mode='Markdown')
+            return
+        sched_id = add_schedule("weekly", time_str, day)
+        await update.message.reply_text(f"*Weekly scan scheduled every {day.title()} at {time_str} UTC*\nID: {sched_id}", parse_mode='Markdown')
+        log_activity("schedule_set", f"weekly {day} at {time_str}")
+
+    elif action == "off":
+        schedules = get_schedules(enabled_only=True)
+        for s in schedules:
+            update_schedule(s['id'], enabled=False)
+        await update.message.reply_text(f"*{len(schedules)} scheduled scan(s) disabled.*", parse_mode='Markdown')
+        log_activity("schedule_off", f"disabled {len(schedules)} schedules")
+
+    elif action == "status":
+        schedules = get_schedules()
+        if not schedules:
+            await update.message.reply_text("No schedules configured.", parse_mode='Markdown')
+        else:
+            lines = ["*Schedule Status*\n"]
+            for s in schedules:
+                status = "ACTIVE" if s.get('enabled') else "DISABLED"
+                lines.append(f"• {s.get('schedule_type', '?').title()} at {s.get('schedule_time', '?')} — {status}")
+            await update.message.reply_text("\n".join(lines), parse_mode='Markdown')
+
+    else:
+        await update.message.reply_text(
+            "*Schedule Commands*\n\n"
+            "`/schedule daily HH:MM` — Daily scan\n"
+            "`/schedule weekly <day> HH:MM` — Weekly scan\n"
+            "`/schedule off` — Disable all schedules\n"
+            "`/schedule status` — Show status",
+            parse_mode='Markdown'
+        )
+
+
+@authorized_only
+async def webhook_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Configure webhook notifications."""
+    args = context.args
+
+    if not args:
+        status = await get_webhook_status()
+        await update.message.reply_text(status, parse_mode='Markdown')
+        return
+
+    action = args[0].lower()
+
+    if action == "set":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: `/webhook set <URL>`\nSupports Discord, Slack, or generic HTTP webhooks.", parse_mode='Markdown')
+            return
+        url = args[1]
+        if not url.startswith('http'):
+            await update.message.reply_text("URL must start with http:// or https://", parse_mode='Markdown')
+            return
+        set_webhook(url)
+        await update.message.reply_text(f"*Webhook configured!*\nURL: `{url[:50]}...`\nUse `/webhook test` to verify.", parse_mode='Markdown')
+        log_activity("webhook_set", url[:80])
+
+    elif action == "test":
+        from modules.notifications import send_webhook, _build_payload
+        webhook = get_webhook()
+        if not webhook:
+            await update.message.reply_text("No webhook configured. Use `/webhook set <URL>` first.", parse_mode='Markdown')
+            return
+        url = webhook.get('url', '')
+        payload = _build_payload(url, "Test Notification", "This is a test from your Telegram Security Bot!", "info")
+        success = await send_webhook(url, payload)
+        if success:
+            await update.message.reply_text("*Webhook test successful!* Notification sent.", parse_mode='Markdown')
+        else:
+            await update.message.reply_text("*Webhook test failed.* Check the URL and try again.", parse_mode='Markdown')
+
+    elif action == "off":
+        disable_webhook()
+        await update.message.reply_text("*Webhook disabled.*", parse_mode='Markdown')
+        log_activity("webhook_disabled", "")
+
+    else:
+        await update.message.reply_text(
+            "*Webhook Commands*\n\n"
+            "`/webhook set <URL>` — Configure webhook\n"
+            "`/webhook test` — Send test notification\n"
+            "`/webhook off` — Disable webhook\n\n"
+            "Supports Discord, Slack, and generic HTTP webhooks.",
+            parse_mode='Markdown'
+        )
+
+
+@authorized_only
+async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Export data as CSV file."""
+    args = context.args
+
+    if not args:
+        await update.message.reply_text(
+            "*Export Data*\n\n"
+            "`/export devices` — All known devices\n"
+            "`/export scans` — Scan history\n"
+            "`/export logs` — Activity logs",
+            parse_mode='Markdown'
+        )
+        return
+
+    export_type = args[0].lower()
+    msg = await update.message.reply_text(f"Exporting {export_type}...")
+
+    try:
+        buf = io_module.StringIO()
+
+        if export_type == "devices":
+            from modules.db import get_devices
+            devices = get_devices(limit=500)
+            if not devices:
+                await msg.edit_text("No device data to export.")
+                return
+            writer = csv.DictWriter(buf, fieldnames=['mac', 'ip', 'vendor', 'hostname', 'status', 'first_seen', 'last_seen'])
+            writer.writeheader()
+            writer.writerows(devices)
+            filename = f"devices_{datetime.now().strftime('%Y%m%d')}.csv"
+            caption = f"Devices export — {len(devices)} records"
+
+        elif export_type == "scans":
+            from modules.db import get_scan_history
+            scans = get_scan_history(limit=500)
+            if not scans:
+                await msg.edit_text("No scan history to export.")
+                return
+            writer = csv.DictWriter(buf, fieldnames=['id', 'timestamp', 'scan_type', 'target', 'result_summary'])
+            writer.writeheader()
+            writer.writerows({k: v for k, v in s.items() if k != 'full_result'} for s in scans)
+            filename = f"scans_{datetime.now().strftime('%Y%m%d')}.csv"
+            caption = f"Scan history export — {len(scans)} records"
+
+        elif export_type == "logs":
+            from modules.db import get_activity_log
+            logs = get_activity_log(limit=500)
+            if not logs:
+                await msg.edit_text("No logs to export.")
+                return
+            writer = csv.DictWriter(buf, fieldnames=['id', 'timestamp', 'event', 'detail'])
+            writer.writeheader()
+            writer.writerows(logs)
+            filename = f"logs_{datetime.now().strftime('%Y%m%d')}.csv"
+            caption = f"Activity log export — {len(logs)} records"
+
+        else:
+            await msg.edit_text("Unknown export type. Use: devices, scans, or logs")
+            return
+
+        buf.seek(0)
+        bytes_buf = io_module.BytesIO(buf.getvalue().encode('utf-8'))
+        await msg.delete()
+        await update.message.reply_document(
+            document=InputFile(bytes_buf, filename=filename),
+            caption=caption
+        )
+        log_activity("export", export_type)
+
+    except Exception as e:
+        await msg.edit_text(f"Export failed: {e}")
+
+
+@authorized_only
+async def compare_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Compare security of two websites."""
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("Usage: `/compare <URL1> <URL2>`", parse_mode='Markdown')
+        return
+
+    url1, url2 = args[0], args[1]
+    msg = await update.message.reply_text(f"Comparing security of:\n`{url1}` vs `{url2}`\n\nPlease wait...", parse_mode='Markdown')
+
+    try:
+        # Run both checks concurrently
+        results = await asyncio.gather(
+            check_website(url1),
+            check_website(url2),
+            return_exceptions=True
+        )
+
+        r1 = results[0] if not isinstance(results[0], Exception) else f"Error: {results[0]}"
+        r2 = results[1] if not isinstance(results[1], Exception) else f"Error: {results[1]}"
+
+        text = (
+            f"*Security Comparison*\n\n"
+            f"*Site 1: {url1}*\n{r1[:1500]}\n\n"
+            f"{'─' * 30}\n\n"
+            f"*Site 2: {url2}*\n{r2[:1500]}"
+        )
+        await msg.delete()
+        await send_long(update, text)
+        log_activity("compare", f"{url1} vs {url2}")
+        increment_stat("scans_done")
+
+    except Exception as e:
+        await msg.edit_text(f"Comparison failed: {e}")
+
+
+@authorized_only
+async def uptime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Monitor website uptime."""
+    args = context.args
+
+    if not args:
+        sites = get_monitored_sites()
+        if not sites:
+            text = (
+                "*Website Uptime Monitor*\n\n"
+                "No sites being monitored.\n\n"
+                "Usage:\n"
+                "`/uptime add <URL> [interval_minutes]`\n"
+                "`/uptime list` — Show monitored sites\n"
+                "`/uptime stop <URL>` — Stop monitoring"
+            )
+        else:
+            lines = ["*Monitored Sites*\n"]
+            for s in sites:
+                status = s.get('status', 'unknown')
+                emoji = "UP" if status == 'up' else ("DOWN" if status == 'down' else "?")
+                lines.append(f"• [{emoji}] `{s.get('url', '?')}`")
+                lines.append(f"  Interval: {s.get('interval_minutes', 5)}min | Last: {s.get('last_check', 'Never')}\n")
+            text = "\n".join(lines)
+        await update.message.reply_text(text, parse_mode='Markdown')
+        return
+
+    action = args[0].lower()
+
+    if action == "add":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: `/uptime add <URL> [interval_minutes]`", parse_mode='Markdown')
+            return
+        url = args[1]
+        if not url.startswith('http'):
+            url = 'https://' + url
+        interval = int(args[2]) if len(args) > 2 else 5
+        interval = max(1, min(60, interval))  # clamp 1-60 minutes
+        added = add_monitored_site(url, interval)
+        if added:
+            await update.message.reply_text(f"*Monitoring started!*\nURL: `{url}`\nInterval: {interval} min", parse_mode='Markdown')
+            log_activity("uptime_add", url)
+        else:
+            await update.message.reply_text(f"`{url}` is already being monitored.", parse_mode='Markdown')
+
+    elif action == "list":
+        sites = get_monitored_sites()
+        if not sites:
+            await update.message.reply_text("No sites being monitored.", parse_mode='Markdown')
+        else:
+            lines = ["*Monitored Sites*\n"]
+            for s in sites:
+                status = s.get('status', 'unknown')
+                emoji = "UP" if status == 'up' else ("DOWN" if status == 'down' else "?")
+                lines.append(f"[{emoji}] `{s.get('url', '?')}` — every {s.get('interval_minutes', 5)}min")
+            await update.message.reply_text("\n".join(lines), parse_mode='Markdown')
+
+    elif action == "stop":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: `/uptime stop <URL>`", parse_mode='Markdown')
+            return
+        url = args[1]
+        if not url.startswith('http'):
+            url = 'https://' + url
+        remove_monitored_site(url)
+        await update.message.reply_text(f"*Stopped monitoring:* `{url}`", parse_mode='Markdown')
+        log_activity("uptime_stop", url)
+
+    else:
+        await update.message.reply_text(
+            "*Uptime Monitor Commands*\n\n"
+            "`/uptime add <URL> [interval]` — Start monitoring\n"
+            "`/uptime list` — Show all monitored sites\n"
+            "`/uptime stop <URL>` — Stop monitoring",
+            parse_mode='Markdown'
+        )
+
+
+@authorized_only
+async def portknock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test port knocking sequence."""
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "*Port Knocking Test*\n\nUsage: `/portknock <IP> <port1> <port2> <port3> ...`\n\nExample: `/portknock 192.168.1.1 1234 5678 9012`",
+            parse_mode='Markdown'
+        )
+        return
+
+    ip = args[0]
+    ports = args[1:]
+
+    msg = await update.message.reply_text(f"Testing port knock on `{ip}`...", parse_mode='Markdown')
+
+    try:
+        import socket
+        results = []
+        for port_str in ports:
+            try:
+                port = int(port_str)
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.5)
+                s.connect_ex((ip, port))
+                s.close()
+                results.append(f"Knocked port {port} — sent")
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                results.append(f"Port {port_str} — error: {e}")
+
+        text = (
+            f"*Port Knock Complete*\n"
+            f"Target: `{ip}`\n"
+            f"Sequence: {' → '.join(ports)}\n\n"
+            f"Results:\n" + "\n".join(f"• {r}" for r in results) +
+            f"\n\nNow test if the target port is open with `/portscan {ip}`"
+        )
+        await msg.edit_text(text, parse_mode='Markdown')
+        log_activity("portknock", f"{ip} [{' '.join(ports)}]")
+    except Exception as e:
+        await msg.edit_text(f"Port knock failed: {e}")
+
+
+@authorized_only
+async def headers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all HTTP response headers with analysis."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: `/headers <URL>`", parse_mode='Markdown')
+        return
+
+    url = args[0]
+    if not url.startswith('http'):
+        url = 'https://' + url
+
+    msg = await update.message.reply_text(f"Fetching headers for `{url}`...", parse_mode='Markdown')
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10), allow_redirects=True) as resp:
+                headers = dict(resp.headers)
+                status = resp.status
+
+        # Security header analysis
+        security_headers = {
+            'Strict-Transport-Security': ('HSTS', True),
+            'Content-Security-Policy': ('CSP', True),
+            'X-Frame-Options': ('Clickjacking protection', True),
+            'X-Content-Type-Options': ('MIME sniffing protection', True),
+            'Referrer-Policy': ('Referrer policy', True),
+            'Permissions-Policy': ('Permissions policy', False),
+            'X-XSS-Protection': ('XSS protection (legacy)', False),
+            'Cache-Control': ('Cache control', False),
+            'Server': ('Server info (should be hidden)', False),
+        }
+
+        lines = [f"*HTTP Headers Analysis*\n`{url}`\nStatus: {status}\n"]
+        lines.append("*Security Headers:*")
+
+        for header, (desc, important) in security_headers.items():
+            val = headers.get(header, headers.get(header.lower(), None))
+            if val:
+                lines.append(f"✅ `{header}`: {val[:80]}")
+            elif important:
+                lines.append(f"❌ `{header}` MISSING — {desc}")
+
+        lines.append("\n*All Headers:*")
+        for k, v in sorted(headers.items()):
+            lines.append(f"`{k}`: {str(v)[:100]}")
+
+        await msg.delete()
+        await send_long(update, "\n".join(lines))
+        log_activity("headers", url)
+        increment_stat("scans_done")
+
+    except Exception as e:
+        await msg.edit_text(f"Headers fetch failed: {e}")
+
+
+@authorized_only
+async def sitemap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch and display sitemap.xml structure."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: `/sitemap <URL>`", parse_mode='Markdown')
+        return
+
+    url = args[0]
+    if not url.startswith('http'):
+        url = 'https://' + url
+
+    # Try common sitemap locations
+    sitemap_urls = [
+        url.rstrip('/') + '/sitemap.xml',
+        url.rstrip('/') + '/sitemap_index.xml',
+        url.rstrip('/') + '/sitemap/',
+    ]
+
+    msg = await update.message.reply_text(f"Fetching sitemap for `{url}`...", parse_mode='Markdown')
+
+    try:
+        from xml.etree import ElementTree as ET
+
+        sitemap_content = None
+        found_url = None
+
+        async with aiohttp.ClientSession() as session:
+            for sm_url in sitemap_urls:
+                try:
+                    async with session.get(sm_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200 and 'xml' in resp.content_type.lower():
+                            sitemap_content = await resp.text()
+                            found_url = sm_url
+                            break
+                except Exception:
+                    continue
+
+        if not sitemap_content:
+            await msg.edit_text(f"No sitemap found for `{url}`\n\nTried:\n" + "\n".join(f"• `{u}`" for u in sitemap_urls), parse_mode='Markdown')
+            return
+
+        # Parse XML
+        root = ET.fromstring(sitemap_content)
+        ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+
+        # Get URLs
+        urls = []
+        for loc in root.findall('.//sm:loc', ns):
+            urls.append(loc.text)
+
+        if not urls:
+            # Try without namespace
+            for loc in root.findall('.//loc'):
+                urls.append(loc.text)
+
+        lines = [f"*Sitemap: {found_url}*\n", f"Total URLs: {len(urls)}\n"]
+
+        # Show first 30 URLs
+        for u in urls[:30]:
+            lines.append(f"• `{u}`")
+
+        if len(urls) > 30:
+            lines.append(f"\n... and {len(urls) - 30} more URLs")
+
+        await msg.delete()
+        await send_long(update, "\n".join(lines))
+        log_activity("sitemap", url)
+
+    except Exception as e:
+        await msg.edit_text(f"Sitemap fetch failed: {e}")
+
+
+@authorized_only
+async def meta_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Extract all meta tags from a website."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: `/meta <URL>`", parse_mode='Markdown')
+        return
+
+    url = args[0]
+    if not url.startswith('http'):
+        url = 'https://' + url
+
+    msg = await update.message.reply_text(f"Extracting meta tags from `{url}`...", parse_mode='Markdown')
+
+    try:
+        import re
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                html = await resp.text(errors='ignore')
+
+        # Extract meta tags
+        meta_pattern = re.compile(r'<meta\s+([^>]+)>', re.IGNORECASE)
+        title_pattern = re.compile(r'<title[^>]*>([^<]+)</title>', re.IGNORECASE)
+
+        metas = meta_pattern.findall(html)
+        title_match = title_pattern.search(html)
+        title = title_match.group(1).strip() if title_match else "Not found"
+
+        lines = [f"*Meta Tags: {url}*\n", f"*Title:* {title[:100]}\n"]
+
+        for meta in metas[:30]:
+            # Extract name/property and content
+            name_match = re.search(r'(?:name|property|http-equiv)=["\']([^"\']+)["\']', meta, re.IGNORECASE)
+            content_match = re.search(r'content=["\']([^"\']+)["\']', meta, re.IGNORECASE)
+            if name_match and content_match:
+                name = name_match.group(1)
+                content = content_match.group(1)[:100]
+                lines.append(f"• *{name}*: {content}")
+
+        if len(metas) > 30:
+            lines.append(f"\n... and {len(metas) - 30} more meta tags")
+
+        await msg.delete()
+        await send_long(update, "\n".join(lines))
+        log_activity("meta", url)
+
+    except Exception as e:
+        await msg.edit_text(f"Meta extraction failed: {e}")
+
+
+@authorized_only
+async def links_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Extract all links from a webpage."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: `/links <URL>`", parse_mode='Markdown')
+        return
+
+    url = args[0]
+    if not url.startswith('http'):
+        url = 'https://' + url
+
+    msg = await update.message.reply_text(f"Extracting links from `{url}`...", parse_mode='Markdown')
+
+    try:
+        import re
+        from urllib.parse import urljoin, urlparse
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                html = await resp.text(errors='ignore')
+
+        base_domain = urlparse(url).netloc
+
+        # Extract all href links
+        link_pattern = re.compile(r'href=["\']([^"\'#][^"\']*)["\']', re.IGNORECASE)
+        raw_links = link_pattern.findall(html)
+
+        internal = set()
+        external = set()
+
+        for link in raw_links:
+            full = urljoin(url, link)
+            if urlparse(full).netloc == base_domain:
+                internal.add(full)
+            elif full.startswith('http'):
+                external.add(full)
+
+        lines = [
+            f"*Links Extracted from {url}*\n",
+            f"Internal: {len(internal)} | External: {len(external)}\n",
+            f"*Internal Links ({min(len(internal), 20)} shown):*"
+        ]
+        for lnk in sorted(internal)[:20]:
+            lines.append(f"• `{lnk}`")
+
+        lines.append(f"\n*External Links ({min(len(external), 20)} shown):*")
+        for lnk in sorted(external)[:20]:
+            lines.append(f"• `{lnk}`")
+
+        if len(internal) > 20 or len(external) > 20:
+            lines.append(f"\nUse `/export` for full list.")
+
+        await msg.delete()
+        await send_long(update, "\n".join(lines))
+        log_activity("links", url)
+
+    except Exception as e:
+        await msg.edit_text(f"Link extraction failed: {e}")
+
+
+@authorized_only
+async def whoisip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """WHOIS lookup for IP addresses."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: `/whoisip <IP>`", parse_mode='Markdown')
+        return
+
+    ip = args[0]
+    msg = await update.message.reply_text(f"Running WHOIS lookup for `{ip}`...", parse_mode='Markdown')
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                data = await resp.json()
+
+        if data.get('status') == 'success':
+            text = (
+                f"*IP WHOIS: {ip}*\n\n"
+                f"*Location:* {data.get('city', '?')}, {data.get('regionName', '?')}, {data.get('country', '?')} ({data.get('countryCode', '?')})\n"
+                f"*Coordinates:* {data.get('lat', '?')}, {data.get('lon', '?')}\n"
+                f"*Timezone:* {data.get('timezone', '?')}\n"
+                f"*ISP:* {data.get('isp', '?')}\n"
+                f"*Org:* {data.get('org', '?')}\n"
+                f"*AS:* {data.get('as', '?')}\n"
+                f"*AS Name:* {data.get('asname', '?')}\n"
+                f"*Mobile:* {'Yes' if data.get('mobile') else 'No'}\n"
+                f"*Proxy/VPN:* {'Yes' if data.get('proxy') else 'No'}\n"
+                f"*Hosting:* {'Yes' if data.get('hosting') else 'No'}"
+            )
+        else:
+            text = f"WHOIS lookup failed: {data.get('message', 'Unknown error')}"
+
+        await msg.edit_text(text, parse_mode='Markdown')
+        log_activity("whoisip", ip)
+        increment_stat("scans_done")
+
+    except Exception as e:
+        await msg.edit_text(f"WHOIS lookup failed: {e}")
+
+
+@authorized_only
+async def reversedns_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reverse DNS lookup for IP addresses."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: `/reversedns <IP>`", parse_mode='Markdown')
+        return
+
+    ip = args[0]
+    msg = await update.message.reply_text(f"Running reverse DNS for `{ip}`...", parse_mode='Markdown')
+
+    try:
+        import socket
+        import dns.resolver
+        import dns.reversename
+
+        # Reverse DNS via socket
+        try:
+            hostname = socket.gethostbyaddr(ip)[0]
+        except Exception:
+            hostname = "No PTR record"
+
+        # Try DNS PTR record
+        try:
+            rev_name = dns.reversename.from_address(ip)
+            ptr_records = dns.resolver.resolve(rev_name, 'PTR')
+            ptr = [str(r) for r in ptr_records]
+        except Exception:
+            ptr = [hostname] if hostname != "No PTR record" else []
+
+        text = (
+            f"*Reverse DNS: {ip}*\n\n"
+            f"*Hostname:* `{hostname}`\n"
+            f"*PTR Records:*\n"
+        )
+        if ptr:
+            for p in ptr:
+                text += f"• `{p}`\n"
+        else:
+            text += "None found\n"
+
+        await msg.edit_text(text, parse_mode='Markdown')
+        log_activity("reversedns", ip)
+        increment_stat("scans_done")
+
+    except Exception as e:
+        await msg.edit_text(f"Reverse DNS failed: {e}")
 
 
 # ============================================================
@@ -1458,15 +2272,35 @@ async def post_init(application: Application):
         BotCommand("timer",         "Set countdown timer"),
         BotCommand("botinfo",       "Bot version & runtime stats"),
         BotCommand("changelog",     "What's new in v2.0"),
+        # v3.0 — Reports & Automation
+        BotCommand("pdfreport",     "Generate PDF security report"),
+        BotCommand("schedule",      "Schedule automated security scans"),
+        BotCommand("webhook",       "Configure webhook notifications"),
+        BotCommand("export",        "Export data as CSV"),
+        BotCommand("compare",       "Compare security of two websites"),
+        BotCommand("uptime",        "Monitor website uptime"),
+        BotCommand("portknock",     "Test port knocking sequence"),
+        BotCommand("headers",       "Show all HTTP headers with analysis"),
+        BotCommand("sitemap",       "Fetch sitemap.xml structure"),
+        BotCommand("meta",          "Extract meta tags from webpage"),
+        BotCommand("links",         "Extract all links from webpage"),
+        BotCommand("whoisip",       "WHOIS lookup for IP addresses"),
+        BotCommand("reversedns",    "Reverse DNS lookup"),
         # Meta
         BotCommand("start",         "Show all commands"),
         BotCommand("help",          "Usage examples"),
     ]
     await application.bot.set_my_commands(commands)
 
+    # Start scheduler and uptime monitor
+    from modules.scheduler import start_scheduler
+    from config import ALLOWED_CHAT_IDS
+    start_scheduler(application, ALLOWED_CHAT_IDS)
+
 
 def main():
     print(f"Starting Telegram Security Bot v{BOT_VERSION}...")
+
     print("=" * 40)
 
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
@@ -1546,6 +2380,20 @@ def main():
     app.add_handler(CommandHandler("timer",          timer_command))
     app.add_handler(CommandHandler("botinfo",        botinfo_command))
     app.add_handler(CommandHandler("changelog",      changelog_command))
+    # v3.0 — Reports & Automation
+    app.add_handler(CommandHandler("pdfreport",      pdfreport_command))
+    app.add_handler(CommandHandler("schedule",       schedule_command))
+    app.add_handler(CommandHandler("webhook",        webhook_command))
+    app.add_handler(CommandHandler("export",         export_command))
+    app.add_handler(CommandHandler("compare",        compare_command))
+    app.add_handler(CommandHandler("uptime",         uptime_command))
+    app.add_handler(CommandHandler("portknock",      portknock_command))
+    app.add_handler(CommandHandler("headers",        headers_command))
+    app.add_handler(CommandHandler("sitemap",        sitemap_command))
+    app.add_handler(CommandHandler("meta",           meta_command))
+    app.add_handler(CommandHandler("links",          links_command))
+    app.add_handler(CommandHandler("whoisip",        whoisip_command))
+    app.add_handler(CommandHandler("reversedns",     reversedns_command))
     # Meta
     app.add_handler(CommandHandler("start",          start_command))
     app.add_handler(CommandHandler("help",           help_command))
